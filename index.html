@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Recipe Collection</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <div class="sidebar-overlay" id="sidebarOverlay"></div>
+
+        <aside class="recipe-list" id="recipeList-sidebar">
+            <h2>Recipes</h2>
+            <ul id="recipeList"></ul>
+        </aside>
+
+        <main class="recipe-detail">
+            <button class="menu-toggle-btn" id="menuToggleBtn">
+                <span></span>
+                <span></span>
+                <span></span>
+            </button>
+            <button class="add-recipe-btn" id="addRecipeBtn">+ Add Recipe</button>
+
+            <div id="recipeContent" class="recipe-content">
+                <div class="placeholder">
+                    <p>Select a recipe from the list to view details</p>
+                </div>
+            </div>
+
+            <div id="recipeDisplay" class="recipe-display hidden">
+                <div class="recipe-header">
+                    <div class="recipe-title-section">
+                        <h1 id="recipeTitle"></h1>
+                        <p class="recipe-author" id="recipeAuthor"></p>
+                        <p class="recipe-source" id="recipeSource"></p>
+                    </div>
+                    <button class="reset-btn" id="resetBtn">Reset Progress</button>
+                </div>
+
+                <div class="recipe-media">
+                    <img id="recipeImage" class="recipe-image" alt="Recipe photo">
+                    <div id="recipeVideo" class="recipe-video hidden"></div>
+                </div>
+
+                <div class="recipe-sections">
+                    <section class="ingredients-section">
+                        <h2>Ingredients</h2>
+                        <ul id="ingredientsList"></ul>
+                    </section>
+
+                    <section class="instructions-section">
+                        <h2>Instructions</h2>
+                        <ol id="instructionsList"></ol>
+                    </section>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <div id="addRecipeModal" class="modal hidden">
+        <div class="modal-content">
+            <h2>Add New Recipe</h2>
+            <form id="addRecipeForm">
+                <label for="recipeName">Recipe Name:</label>
+                <input type="text" id="recipeName" required>
+
+                <label for="recipeAuthor">Author:</label>
+                <input type="text" id="recipeAuthor" required>
+
+                <label for="recipeImage">Image URL (optional):</label>
+                <input type="url" id="recipeImageUrl">
+
+                <label for="recipeSource">Source:</label>
+                <select id="recipeSource" required>
+                    <option value="">Select a source</option>
+                    <option value="youtube">YouTube</option>
+                    <option value="cookbook">Cookbook</option>
+                    <option value="manual">Manually Entered</option>
+                </select>
+
+                <div id="youtubeFields" class="conditional-field hidden">
+                    <label for="youtubeUrl">YouTube URL:</label>
+                    <input type="url" id="youtubeUrl" placeholder="https://www.youtube.com/watch?v=...">
+                </div>
+
+                <div id="cookbookFields" class="conditional-field hidden">
+                    <label for="bookName">Cookbook Name:</label>
+                    <input type="text" id="bookName">
+
+                    <label for="amazonLink">Amazon Affiliate Link:</label>
+                    <input type="url" id="amazonLink" placeholder="https://www.amazon.com/...">
+                </div>
+
+                <label for="recipeIngredients">Ingredients (one per line):</label>
+                <textarea id="recipeIngredients" rows="8" required></textarea>
+
+                <label for="recipeInstructions">Instructions (one per line):</label>
+                <textarea id="recipeInstructions" rows="8" required></textarea>
+
+                <div class="modal-buttons">
+                    <button type="submit" class="btn-primary">Add Recipe</button>
+                    <button type="button" class="btn-secondary" id="cancelBtn">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
