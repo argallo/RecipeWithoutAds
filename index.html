@@ -12,6 +12,11 @@
 
         <aside class="recipe-list" id="recipeList-sidebar">
             <h2>Recipes</h2>
+            <div class="search-container">
+                <input type="text" id="recipeSearch" class="search-input" placeholder="Search recipes or authors...">
+                <button class="search-clear-btn" id="searchClearBtn" aria-label="Clear search">&times;</button>
+                <div class="autocomplete-dropdown" id="autocompleteDropdown"></div>
+            </div>
             <ul id="recipeList"></ul>
         </aside>
 
@@ -24,8 +29,19 @@
             <button class="add-recipe-btn" id="addRecipeBtn">+ Add Recipe</button>
 
             <div id="recipeContent" class="recipe-content">
-                <div class="placeholder">
-                    <p>Select a recipe from the list to view details</p>
+                <div class="landing-page">
+                    <div class="landing-search-container">
+                        <h1 class="landing-title">Find Your Perfect Recipe</h1>
+                        <div class="landing-search-wrapper">
+                            <input type="text" id="landingSearch" class="landing-search-input" placeholder="Search recipes or authors...">
+                            <button class="landing-search-clear-btn" id="landingSearchClearBtn" aria-label="Clear search">&times;</button>
+                        </div>
+                        <div class="landing-autocomplete-dropdown" id="landingAutocompleteDropdown"></div>
+                    </div>
+                    <div class="random-recipes-section">
+                        <h2>Try These Recipes</h2>
+                        <div class="random-recipes-grid" id="randomRecipesGrid"></div>
+                    </div>
                 </div>
             </div>
 
