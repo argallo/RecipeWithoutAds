@@ -10,6 +10,10 @@ body {
     overflow: hidden;
 }
 
+.hidden {
+    display: none !important;
+}
+
 .container {
     display: flex;
     height: 100vh;
@@ -165,6 +169,25 @@ body {
     position: relative;
 }
 
+.site-logo {
+    position: absolute;
+    top: 20px;
+    left: 40px;
+    text-decoration: none;
+    z-index: 100;
+    transition: opacity 0.2s;
+}
+
+.site-logo:hover {
+    opacity: 0.8;
+}
+
+.logo-image {
+    height: 120px;
+    width: auto;
+    display: block;
+}
+
 .add-recipe-btn {
     position: absolute;
     top: 30px;
@@ -184,12 +207,98 @@ body {
     background-color: #357abd;
 }
 
+.user-menu {
+    position: absolute;
+    top: 30px;
+    right: 180px;
+}
+
+.login-btn {
+    padding: 10px 20px;
+    background-color: #4a90e2;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    font-size: 16px;
+    cursor: pointer;
+    font-weight: 500;
+    transition: background-color 0.2s;
+}
+
+.login-btn:hover {
+    background-color: #357abd;
+}
+
+.user-dropdown {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+}
+
+.user-dropdown.hidden {
+    display: none;
+}
+
+.username-display {
+    color: #333;
+    font-weight: 500;
+    font-size: 16px;
+}
+
+.logout-btn {
+    padding: 8px 16px;
+    background-color: #e74c3c;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    font-size: 14px;
+    cursor: pointer;
+    font-weight: 500;
+    transition: background-color 0.2s;
+}
+
+.logout-btn:hover {
+    background-color: #c0392b;
+}
+
+.auth-modal {
+    max-width: 450px;
+}
+
+.auth-error {
+    color: #e74c3c;
+    font-size: 14px;
+    margin-top: 10px;
+    min-height: 20px;
+}
+
+.auth-switch {
+    text-align: center;
+    margin-top: 20px;
+    color: #666;
+    font-size: 14px;
+}
+
+.link-btn {
+    background: none;
+    border: none;
+    color: #4a90e2;
+    cursor: pointer;
+    text-decoration: underline;
+    font-size: 14px;
+    padding: 0;
+}
+
+.link-btn:hover {
+    color: #357abd;
+}
+
 .recipe-content {
     max-width: 900px;
 }
 
 .landing-page {
-    padding: 60px 20px;
+    padding: 140px 20px 60px 20px;
     max-width: 800px;
     margin: 0 auto;
 }
@@ -332,6 +441,7 @@ body {
 
 .recipe-display {
     max-width: 900px;
+    margin-top: 120px;
 }
 
 .recipe-display.hidden {
@@ -757,6 +867,20 @@ body {
         width: 100%;
     }
 
+    .site-logo {
+        top: 15px;
+        left: 70px;
+    }
+
+    .logo-image {
+        height: 70px;
+    }
+
+    .user-menu {
+        top: 90px;
+        right: 20px;
+    }
+
     .add-recipe-btn {
         top: 20px;
         right: 20px;
@@ -797,7 +921,7 @@ body {
     }
 
     .landing-page {
-        padding: 40px 15px;
+        padding: 100px 15px 40px 15px;
     }
 
     .landing-title {

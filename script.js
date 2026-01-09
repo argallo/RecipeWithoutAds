@@ -1,5 +1,5 @@
-// Sample recipes data
-let recipes = [
+// Sample recipes data (for non-authenticated users)
+const sampleRecipes = [
     {
         id: 1,
         name: "Classic Spaghetti Carbonara",
@@ -124,6 +124,9 @@ let recipes = [
     }
 ];
 
+// User recipes (for authenticated users)
+let recipes = [];
+
 let currentRecipeId = null;
 
 // Track checkbox state for each recipe
@@ -154,6 +157,39 @@ const landingAutocompleteDropdown = document.getElementById('landingAutocomplete
 const landingSearchClearBtn = document.getElementById('landingSearchClearBtn');
 const randomRecipesGrid = document.getElementById('randomRecipesGrid');
 const landingPage = document.querySelector('.landing-page');
+const loginBtn = document.getElementById('loginBtn');
+const logoutBtn = document.getElementById('logoutBtn');
+const loginModal = document.getElementById('loginModal');
+const signupModal = document.getElementById('signupModal');
+const loginForm = document.getElementById('loginForm');
+const signupForm = document.getElementById('signupForm');
+const cancelLoginBtn = document.getElementById('cancelLoginBtn');
+const cancelSignupBtn = document.getElementById('cancelSignupBtn');
+const showSignupBtn = document.getElementById('showSignupBtn');
+const showLoginBtn = document.getElementById('showLoginBtn');
+const userDropdown = document.getElementById('userDropdown');
+const usernameDisplay = document.getElementById('usernameDisplay');
+const loginError = document.getElementById('loginError');
+const signupError = document.getElementById('signupError');
+const siteLogo = document.getElementById('siteLogo');
+
+// Authentication state
+let currentUser = null;
+let isAuthenticated = false;
+
+// Get current recipes based on authentication status
+function getCurrentRecipes() {
+    // If authenticated but no recipes yet, show sample recipes
+    if (isAuthenticated && recipes.length === 0) {
+        return sampleRecipes;
+    }
+    // If authenticated with recipes, show user recipes
+    if (isAuthenticated) {
+        return recipes;
+    }
+    // If not authenticated, show sample recipes
+    return sampleRecipes;
+}
 
 // Helper function to extract YouTube video ID from URL
 function getYouTubeVideoId(url) {
@@ -178,12 +214,13 @@ function closeSidebar() {
 
 // Search and filter recipes
 function filterRecipes(query) {
+    const currentRecipes = getCurrentRecipes();
     if (!query || query.trim() === '') {
-        return recipes;
+        return currentRecipes;
     }
 
     const lowerQuery = query.toLowerCase();
-    return recipes.filter(recipe => {
+    return currentRecipes.filter(recipe => {
         const nameMatch = recipe.name.toLowerCase().includes(lowerQuery);
         const authorMatch = recipe.author.toLowerCase().includes(lowerQuery);
         return nameMatch || authorMatch;
@@ -251,7 +288,7 @@ function toggleClearButton() {
 function clearSearch() {
     searchInput.value = '';
     searchQuery = '';
-    filteredRecipes = recipes;
+    filteredRecipes = [];
     autocompleteDropdown.classList.remove('active');
     selectedAutocompleteIndex = -1;
     searchClearBtn.classList.remove('visible');
@@ -267,7 +304,7 @@ function handleSearchInput(e) {
 
     if (searchQuery.trim() === '') {
         autocompleteDropdown.classList.remove('active');
-        filteredRecipes = recipes;
+        filteredRecipes = [];
         renderRecipeList();
         return;
     }
@@ -308,8 +345,9 @@ function updateSearch() {
 
 // Get random recipes
 function getRandomRecipes(count) {
-    const shuffled = [...recipes].sort(() => 0.5 - Math.random());
-    return shuffled.slice(0, Math.min(count, recipes.length));
+    const currentRecipes = getCurrentRecipes();
+    const shuffled = [...currentRecipes].sort(() => 0.5 - Math.random());
+    return shuffled.slice(0, Math.min(count, currentRecipes.length));
 }
 
 // Render random recipe cards
@@ -364,20 +402,132 @@ function clearLandingSearch() {
     landingSearch.value = '';
     landingAutocompleteDropdown.classList.remove('active');
     landingSearchClearBtn.classList.remove('visible');
+    selectedLandingAutocompleteIndex = -1;
+
+    // Restore the random recipes view
+    const randomRecipesSection = document.querySelector('.random-recipes-section');
+    const heading = randomRecipesSection.querySelector('h2');
+    heading.textContent = 'Try These Recipes';
+    renderRandomRecipes();
+
     landingSearch.focus();
 }
+
+let selectedLandingAutocompleteIndex = -1;
 
 function handleLandingSearchInput(e) {
     const query = e.target.value;
     toggleLandingClearButton();
+    selectedLandingAutocompleteIndex = -1;
 
     if (query.trim() === '') {
         landingAutocompleteDropdown.classList.remove('active');
+
+        // Restore the random recipes view
+        const randomRecipesSection = document.querySelector('.random-recipes-section');
+        const heading = randomRecipesSection.querySelector('h2');
+        heading.textContent = 'Try These Recipes';
+        renderRandomRecipes();
         return;
     }
 
     const filtered = filterRecipes(query);
-    renderLandingAutocomplete(filtered.slice(0, 5));
+    renderLandingAutocomplete(filtered);
+}
+
+function handleLandingSearchKeydown(e) {
+    const query = landingSearch.value.trim();
+
+    if (query === '') return;
+
+    const filtered = filterRecipes(query);
+    const suggestions = filtered.slice(0, 5);
+
+    if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        selectedLandingAutocompleteIndex = Math.min(selectedLandingAutocompleteIndex + 1, suggestions.length - 1);
+        renderLandingAutocomplete(filtered);
+    } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        selectedLandingAutocompleteIndex = Math.max(selectedLandingAutocompleteIndex - 1, -1);
+        renderLandingAutocomplete(filtered);
+    } else if (e.key === 'Enter') {
+        e.preventDefault();
+        if (selectedLandingAutocompleteIndex >= 0 && selectedLandingAutocompleteIndex < suggestions.length) {
+            // Select the highlighted suggestion
+            const selectedRecipe = suggestions[selectedLandingAutocompleteIndex];
+            selectLandingAutocompleteItem(selectedRecipe);
+        } else {
+            // Show results page with all matching recipes
+            showLandingSearchResults(query, filtered);
+        }
+    } else if (e.key === 'Escape') {
+        landingAutocompleteDropdown.classList.remove('active');
+        selectedLandingAutocompleteIndex = -1;
+    }
+}
+
+function showLandingSearchResults(query, results) {
+    // Close autocomplete
+    landingAutocompleteDropdown.classList.remove('active');
+    selectedLandingAutocompleteIndex = -1;
+
+    // Update the heading
+    const randomRecipesSection = document.querySelector('.random-recipes-section');
+    const heading = randomRecipesSection.querySelector('h2');
+
+    if (results.length === 0) {
+        heading.textContent = `No results found for "${query}"`;
+        randomRecipesGrid.innerHTML = '<p style="grid-column: 1/-1; text-align: center; color: #666;">Try a different search term</p>';
+    } else {
+        heading.textContent = `Search results for "${query}" (${results.length})`;
+        renderSearchResults(results);
+    }
+}
+
+function renderSearchResults(results) {
+    randomRecipesGrid.innerHTML = '';
+
+    results.forEach(recipe => {
+        const card = document.createElement('div');
+        card.className = 'recipe-card';
+        card.addEventListener('click', () => {
+            showRecipe(recipe.id);
+        });
+
+        if (recipe.image) {
+            const img = document.createElement('img');
+            img.src = recipe.image;
+            img.alt = recipe.name;
+            img.className = 'recipe-card-image';
+            card.appendChild(img);
+        }
+
+        const content = document.createElement('div');
+        content.className = 'recipe-card-content';
+
+        const title = document.createElement('div');
+        title.className = 'recipe-card-title';
+        title.textContent = recipe.name;
+
+        const author = document.createElement('div');
+        author.className = 'recipe-card-author';
+        author.textContent = `by ${recipe.author}`;
+
+        content.appendChild(title);
+        content.appendChild(author);
+        card.appendChild(content);
+
+        randomRecipesGrid.appendChild(card);
+    });
+}
+
+function selectLandingAutocompleteItem(recipe) {
+    landingSearch.value = '';
+    landingSearchClearBtn.classList.remove('visible');
+    landingAutocompleteDropdown.classList.remove('active');
+    selectedLandingAutocompleteIndex = -1;
+    showRecipe(recipe.id);
 }
 
 function renderLandingAutocomplete(suggestions) {
@@ -388,9 +538,15 @@ function renderLandingAutocomplete(suggestions) {
         return;
     }
 
-    suggestions.forEach(recipe => {
+    const displaySuggestions = suggestions.slice(0, 5);
+
+    displaySuggestions.forEach((recipe, index) => {
         const item = document.createElement('div');
         item.className = 'autocomplete-item';
+
+        if (index === selectedLandingAutocompleteIndex) {
+            item.classList.add('selected');
+        }
 
         const nameSpan = document.createElement('div');
         nameSpan.className = 'recipe-name';
@@ -404,10 +560,7 @@ function renderLandingAutocomplete(suggestions) {
         item.appendChild(authorSpan);
 
         item.addEventListener('click', () => {
-            landingSearch.value = '';
-            landingSearchClearBtn.classList.remove('visible');
-            landingAutocompleteDropdown.classList.remove('active');
-            showRecipe(recipe.id);
+            selectLandingAutocompleteItem(recipe);
         });
 
         landingAutocompleteDropdown.appendChild(item);
@@ -416,18 +569,198 @@ function renderLandingAutocomplete(suggestions) {
     landingAutocompleteDropdown.classList.add('active');
 }
 
+// Authentication functions
+async function checkAuthStatus() {
+    try {
+        const response = await fetch('/api/user');
+        if (response.ok) {
+            const data = await response.json();
+            currentUser = data.user;
+            isAuthenticated = true;
+            updateAuthUI();
+            await loadRecipes();
+        } else {
+            isAuthenticated = false;
+            currentUser = null;
+            updateAuthUI();
+        }
+    } catch (error) {
+        console.error('Error checking auth status:', error);
+        isAuthenticated = false;
+        updateAuthUI();
+    }
+}
+
+function updateAuthUI() {
+    if (isAuthenticated && currentUser) {
+        loginBtn.classList.add('hidden');
+        userDropdown.classList.remove('hidden');
+        usernameDisplay.textContent = currentUser.username;
+    } else {
+        loginBtn.classList.remove('hidden');
+        userDropdown.classList.add('hidden');
+    }
+}
+
+async function handleLogin(e) {
+    e.preventDefault();
+    loginError.textContent = '';
+
+    const email = document.getElementById('loginEmail').value;
+    const password = document.getElementById('loginPassword').value;
+
+    try {
+        const response = await fetch('/api/login', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ email, password })
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+            currentUser = data.user;
+            isAuthenticated = true;
+            updateAuthUI();
+            loginModal.classList.add('hidden');
+            loginForm.reset();
+            await loadRecipes();
+        } else {
+            loginError.textContent = data.error || 'Login failed';
+        }
+    } catch (error) {
+        console.error('Login error:', error);
+        loginError.textContent = 'An error occurred. Please try again.';
+    }
+}
+
+async function handleSignup(e) {
+    e.preventDefault();
+    signupError.textContent = '';
+
+    const username = document.getElementById('signupUsername').value;
+    const email = document.getElementById('signupEmail').value;
+    const password = document.getElementById('signupPassword').value;
+
+    try {
+        const response = await fetch('/api/signup', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ username, email, password })
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+            currentUser = data.user;
+            isAuthenticated = true;
+            updateAuthUI();
+            signupModal.classList.add('hidden');
+            signupForm.reset();
+            await loadRecipes();
+        } else {
+            signupError.textContent = data.error || 'Signup failed';
+        }
+    } catch (error) {
+        console.error('Signup error:', error);
+        signupError.textContent = 'An error occurred. Please try again.';
+    }
+}
+
+async function handleLogout() {
+    try {
+        const response = await fetch('/api/logout', {
+            method: 'POST'
+        });
+
+        if (response.ok) {
+            currentUser = null;
+            isAuthenticated = false;
+            recipes = [];
+            currentRecipeId = null;
+            searchQuery = '';
+            searchInput.value = '';
+            filteredRecipes = [];
+            updateAuthUI();
+            renderRecipeList();
+            renderRandomRecipes();
+
+            // Hide recipe display and show landing page
+            recipeDisplay.classList.add('hidden');
+            landingPage.style.display = 'block';
+        }
+    } catch (error) {
+        console.error('Logout error:', error);
+    }
+}
+
+async function loadRecipes() {
+    if (!isAuthenticated) {
+        recipes = [];
+        filteredRecipes = [];
+        renderRecipeList();
+        renderRandomRecipes();
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/recipes');
+        if (response.ok) {
+            const data = await response.json();
+            recipes = data.recipes;
+            filteredRecipes = [];
+            searchQuery = '';
+            searchInput.value = '';
+            renderRecipeList();
+            renderRandomRecipes();
+        }
+    } catch (error) {
+        console.error('Error loading recipes:', error);
+    }
+}
+
+function showLoginModal() {
+    loginModal.classList.remove('hidden');
+    loginError.textContent = '';
+}
+
+function showSignupModal() {
+    signupModal.classList.remove('hidden');
+    signupError.textContent = '';
+}
+
+function switchToSignup() {
+    loginModal.classList.add('hidden');
+    loginForm.reset();
+    loginError.textContent = '';
+    showSignupModal();
+}
+
+function switchToLogin() {
+    signupModal.classList.add('hidden');
+    signupForm.reset();
+    signupError.textContent = '';
+    showLoginModal();
+}
+
 // Initialize
-function init() {
-    filteredRecipes = recipes;
+async function init() {
+    filteredRecipes = [];
     renderRecipeList();
     renderRandomRecipes();
     setupEventListeners();
+    await checkAuthStatus();
 }
 
 // Render recipe list
 function renderRecipeList() {
     recipeList.innerHTML = '';
-    const recipesToShow = searchQuery.trim() === '' ? recipes : filteredRecipes;
+    const currentRecipes = getCurrentRecipes();
+    const recipesToShow = searchQuery.trim() === '' ? currentRecipes : filteredRecipes;
 
     if (recipesToShow.length === 0) {
         const li = document.createElement('li');
@@ -453,7 +786,8 @@ function renderRecipeList() {
 
 // Show recipe details
 function showRecipe(recipeId) {
-    const recipe = recipes.find(r => r.id === recipeId);
+    const currentRecipes = getCurrentRecipes();
+    const recipe = currentRecipes.find(r => r.id === recipeId);
     if (!recipe) return;
 
     currentRecipeId = recipeId;
@@ -631,7 +965,8 @@ function renderInstructions(recipe, recipeId) {
 function resetRecipe() {
     if (!currentRecipeId) return;
 
-    const recipe = recipes.find(r => r.id === currentRecipeId);
+    const currentRecipes = getCurrentRecipes();
+    const recipe = currentRecipes.find(r => r.id === currentRecipeId);
     if (!recipe) return;
 
     // Reset all checkboxes to unchecked
@@ -645,8 +980,43 @@ function resetRecipe() {
     renderInstructions(recipe, currentRecipeId);
 }
 
+// Return to home page
+function goToHome(e) {
+    e.preventDefault();
+
+    // Hide recipe display and show landing page
+    recipeDisplay.classList.add('hidden');
+    landingPage.style.display = 'block';
+
+    // Clear current recipe
+    currentRecipeId = null;
+
+    // Clear searches
+    searchQuery = '';
+    searchInput.value = '';
+    searchClearBtn.classList.remove('visible');
+    filteredRecipes = [];
+
+    landingSearch.value = '';
+    landingSearchClearBtn.classList.remove('visible');
+    selectedLandingAutocompleteIndex = -1;
+    landingAutocompleteDropdown.classList.remove('active');
+
+    // Restore random recipes
+    const randomRecipesSection = document.querySelector('.random-recipes-section');
+    const heading = randomRecipesSection.querySelector('h2');
+    heading.textContent = 'Try These Recipes';
+    renderRandomRecipes();
+
+    // Close mobile sidebar if open
+    closeSidebar();
+}
+
 // Setup event listeners
 function setupEventListeners() {
+    // Site logo home link
+    siteLogo.addEventListener('click', goToHome);
+
     // Mobile menu toggle
     menuToggleBtn.addEventListener('click', toggleSidebar);
 
@@ -660,6 +1030,7 @@ function setupEventListeners() {
 
     // Landing search functionality
     landingSearch.addEventListener('input', handleLandingSearchInput);
+    landingSearch.addEventListener('keydown', handleLandingSearchKeydown);
     landingSearchClearBtn.addEventListener('click', clearLandingSearch);
 
     // Close autocomplete when clicking outside
@@ -674,6 +1045,10 @@ function setupEventListeners() {
     });
 
     addRecipeBtn.addEventListener('click', () => {
+        if (!isAuthenticated) {
+            showLoginModal();
+            return;
+        }
         addRecipeModal.classList.remove('hidden');
     });
 
@@ -713,6 +1088,44 @@ function setupEventListeners() {
         e.preventDefault();
         addNewRecipe();
     });
+
+    // Authentication event listeners
+    loginBtn.addEventListener('click', showLoginModal);
+    logoutBtn.addEventListener('click', handleLogout);
+    loginForm.addEventListener('submit', handleLogin);
+    signupForm.addEventListener('submit', handleSignup);
+
+    cancelLoginBtn.addEventListener('click', () => {
+        loginModal.classList.add('hidden');
+        loginForm.reset();
+        loginError.textContent = '';
+    });
+
+    cancelSignupBtn.addEventListener('click', () => {
+        signupModal.classList.add('hidden');
+        signupForm.reset();
+        signupError.textContent = '';
+    });
+
+    showSignupBtn.addEventListener('click', switchToSignup);
+    showLoginBtn.addEventListener('click', switchToLogin);
+
+    // Close modals when clicking outside
+    loginModal.addEventListener('click', (e) => {
+        if (e.target === loginModal) {
+            loginModal.classList.add('hidden');
+            loginForm.reset();
+            loginError.textContent = '';
+        }
+    });
+
+    signupModal.addEventListener('click', (e) => {
+        if (e.target === signupModal) {
+            signupModal.classList.add('hidden');
+            signupForm.reset();
+            signupError.textContent = '';
+        }
+    });
 }
 
 // Helper to hide all conditional fields
@@ -725,7 +1138,12 @@ function hideAllConditionalFields() {
 }
 
 // Add new recipe
-function addNewRecipe() {
+async function addNewRecipe() {
+    if (!isAuthenticated) {
+        alert('Please login to add recipes');
+        return;
+    }
+
     const name = document.getElementById('recipeName').value;
     const author = document.getElementById('recipeAuthor').value;
     const imageUrl = document.getElementById('recipeImageUrl').value;
@@ -752,8 +1170,7 @@ function addNewRecipe() {
         source.amazonLink = document.getElementById('amazonLink').value;
     }
 
-    const newRecipe = {
-        id: recipes.length > 0 ? Math.max(...recipes.map(r => r.id)) + 1 : 1,
+    const recipeData = {
         name: name,
         author: author,
         image: imageUrl || null,
@@ -762,20 +1179,41 @@ function addNewRecipe() {
         instructions: instructions
     };
 
-    recipes.push(newRecipe);
+    try {
+        const response = await fetch('/api/recipes', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(recipeData)
+        });
 
-    // Clear search and update filtered list
-    searchInput.value = '';
-    searchQuery = '';
-    filteredRecipes = recipes;
+        const data = await response.json();
 
-    renderRecipeList();
-    renderRandomRecipes(); // Update random recipes
-    showRecipe(newRecipe.id);
+        if (response.ok) {
+            // Add the new recipe to local array
+            recipes.push(data.recipe);
 
-    addRecipeModal.classList.add('hidden');
-    addRecipeForm.reset();
-    hideAllConditionalFields();
+            // Clear search and update filtered list
+            searchInput.value = '';
+            searchQuery = '';
+            filteredRecipes = [];
+            searchClearBtn.classList.remove('visible');
+
+            renderRecipeList();
+            renderRandomRecipes();
+            showRecipe(data.recipe.id);
+
+            addRecipeModal.classList.add('hidden');
+            addRecipeForm.reset();
+            hideAllConditionalFields();
+        } else {
+            alert(data.error || 'Failed to add recipe');
+        }
+    } catch (error) {
+        console.error('Error adding recipe:', error);
+        alert('An error occurred while adding the recipe');
+    }
 }
 
 // Start the app

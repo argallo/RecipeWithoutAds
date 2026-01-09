@@ -21,11 +21,21 @@
         </aside>
 
         <main class="recipe-detail">
+            <a href="#" class="site-logo" id="siteLogo">
+                <img src="logo.png" alt="Recipe Without Ads" class="logo-image">
+            </a>
             <button class="menu-toggle-btn" id="menuToggleBtn">
                 <span></span>
                 <span></span>
                 <span></span>
             </button>
+            <div class="user-menu" id="userMenu">
+                <button class="login-btn" id="loginBtn">Login</button>
+                <div class="user-dropdown hidden" id="userDropdown">
+                    <span class="username-display" id="usernameDisplay"></span>
+                    <button class="logout-btn" id="logoutBtn">Logout</button>
+                </div>
+            </div>
             <button class="add-recipe-btn" id="addRecipeBtn">+ Add Recipe</button>
 
             <div id="recipeContent" class="recipe-content">
@@ -118,6 +128,59 @@
                 <div class="modal-buttons">
                     <button type="submit" class="btn-primary">Add Recipe</button>
                     <button type="button" class="btn-secondary" id="cancelBtn">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Login Modal -->
+    <div id="loginModal" class="modal hidden">
+        <div class="modal-content auth-modal">
+            <h2>Login</h2>
+            <form id="loginForm">
+                <label for="loginEmail">Username or Email:</label>
+                <input type="text" id="loginEmail" required>
+
+                <label for="loginPassword">Password:</label>
+                <input type="password" id="loginPassword" required>
+
+                <div class="auth-error" id="loginError"></div>
+
+                <div class="modal-buttons">
+                    <button type="submit" class="btn-primary">Login</button>
+                    <button type="button" class="btn-secondary" id="cancelLoginBtn">Cancel</button>
+                </div>
+
+                <div class="auth-switch">
+                    Don't have an account? <button type="button" class="link-btn" id="showSignupBtn">Sign up</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Signup Modal -->
+    <div id="signupModal" class="modal hidden">
+        <div class="modal-content auth-modal">
+            <h2>Sign Up</h2>
+            <form id="signupForm">
+                <label for="signupUsername">Username:</label>
+                <input type="text" id="signupUsername" required>
+
+                <label for="signupEmail">Email:</label>
+                <input type="email" id="signupEmail" required>
+
+                <label for="signupPassword">Password:</label>
+                <input type="password" id="signupPassword" required minlength="6">
+
+                <div class="auth-error" id="signupError"></div>
+
+                <div class="modal-buttons">
+                    <button type="submit" class="btn-primary">Sign Up</button>
+                    <button type="button" class="btn-secondary" id="cancelSignupBtn">Cancel</button>
+                </div>
+
+                <div class="auth-switch">
+                    Already have an account? <button type="button" class="link-btn" id="showLoginBtn">Login</button>
                 </div>
             </form>
         </div>
