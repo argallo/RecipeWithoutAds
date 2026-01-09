@@ -1,11 +1,13 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Recipe Collection</title>
     <link rel="stylesheet" href="styles.css">
 </head>
+
 <body>
     <div class="container">
         <div class="sidebar-overlay" id="sidebarOverlay"></div>
@@ -43,8 +45,10 @@
                     <div class="landing-search-container">
                         <h1 class="landing-title">Find Your Perfect Recipe</h1>
                         <div class="landing-search-wrapper">
-                            <input type="text" id="landingSearch" class="landing-search-input" placeholder="Search recipes or authors...">
-                            <button class="landing-search-clear-btn" id="landingSearchClearBtn" aria-label="Clear search">&times;</button>
+                            <input type="text" id="landingSearch" class="landing-search-input"
+                                placeholder="Search recipes or authors...">
+                            <button class="landing-search-clear-btn" id="landingSearchClearBtn"
+                                aria-label="Clear search">&times;</button>
                         </div>
                         <div class="landing-autocomplete-dropdown" id="landingAutocompleteDropdown"></div>
                     </div>
@@ -61,6 +65,10 @@
                         <h1 id="recipeTitle"></h1>
                         <p class="recipe-author" id="recipeAuthor"></p>
                         <p class="recipe-source" id="recipeSource"></p>
+                        <div class="recipe-rating-display" id="recipeRatingDisplay">
+                            <div class="stars" id="recipeStars"></div>
+                            <span class="rating-text" id="ratingText"></span>
+                        </div>
                     </div>
                     <button class="reset-btn" id="resetBtn">Reset Progress</button>
                 </div>
@@ -83,6 +91,26 @@
                 </div>
             </div>
         </main>
+    </div>
+
+    <!-- Rating Modal -->
+    <div id="ratingModal" class="modal hidden">
+        <div class="modal-content rating-modal">
+            <h2>Rate This Recipe</h2>
+            <p class="rating-prompt">How did you like this recipe?</p>
+            <div class="star-rating-input" id="starRatingInput">
+                <span class="star" data-rating="1">★</span>
+                <span class="star" data-rating="2">★</span>
+                <span class="star" data-rating="3">★</span>
+                <span class="star" data-rating="4">★</span>
+                <span class="star" data-rating="5">★</span>
+            </div>
+            <p class="selected-rating-text" id="selectedRatingText">Select a rating</p>
+            <div class="modal-buttons">
+                <button type="button" class="btn-primary" id="submitRatingBtn" disabled>Submit Rating</button>
+                <button type="button" class="btn-secondary" id="cancelRatingBtn">Maybe Later</button>
+            </div>
+        </div>
     </div>
 
     <div id="addRecipeModal" class="modal hidden">
@@ -188,4 +216,5 @@
 
     <script src="script.js"></script>
 </body>
+
 </html>

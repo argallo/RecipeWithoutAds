@@ -51,6 +51,22 @@ function initializeDatabase() {
         if (err) console.error('Error creating recipes table:', err);
         else console.log('Recipes table ready');
     });
+
+    db.run(`
+        CREATE TABLE IF NOT EXISTS ratings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            recipe_id INTEGER NOT NULL,
+            rating INTEGER NOT NULL CHECK(rating >= 1 AND rating <= 5),
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(user_id, recipe_id),
+            FOREIGN KEY (user_id) REFERENCES users(id),
+            FOREIGN KEY (recipe_id) REFERENCES recipes(id)
+        )
+    `, (err) => {
+        if (err) console.error('Error creating ratings table:', err);
+        else console.log('Ratings table ready');
+    });
 }
 
 // Middleware
@@ -94,7 +110,7 @@ app.post('/api/signup', async (req, res) => {
         db.run(
             'INSERT INTO users (username, email, password) VALUES (?, ?, ?)',
             [username, email, hashedPassword],
-            function(err) {
+            function (err) {
                 if (err) {
                     if (err.message.includes('UNIQUE constraint failed: users.username')) {
                         return res.status(400).json({ error: 'Username already exists' });
@@ -180,7 +196,18 @@ app.get('/api/user', (req, res) => {
 
 // Recipe routes
 app.get('/api/recipes', requireAuth, (req, res) => {
-    db.all('SELECT * FROM recipes WHERE user_id = ? ORDER BY created_at DESC', [req.session.userId], (err, recipes) => {
+    const query = `
+        SELECT r.*, 
+               COALESCE(AVG(rt.rating), 0) as average_rating,
+               COUNT(rt.id) as rating_count
+        FROM recipes r
+        LEFT JOIN ratings rt ON r.id = rt.recipe_id
+        WHERE r.user_id = ?
+        GROUP BY r.id
+        ORDER BY r.created_at DESC
+    `;
+
+    db.all(query, [req.session.userId], (err, recipes) => {
         if (err) {
             return res.status(500).json({ error: 'Error fetching recipes' });
         }
@@ -189,7 +216,9 @@ app.get('/api/recipes', requireAuth, (req, res) => {
             ...recipe,
             source: recipe.source_data ? JSON.parse(recipe.source_data) : { type: recipe.source_type },
             ingredients: JSON.parse(recipe.ingredients),
-            instructions: JSON.parse(recipe.instructions)
+            instructions: JSON.parse(recipe.instructions),
+            averageRating: Math.round(recipe.average_rating * 10) / 10,
+            ratingCount: recipe.rating_count
         }));
 
         res.json({ recipes: formattedRecipes });
@@ -212,7 +241,7 @@ app.post('/api/recipes', requireAuth, (req, res) => {
             JSON.stringify(ingredients),
             JSON.stringify(instructions)
         ],
-        function(err) {
+        function (err) {
             if (err) {
                 return res.status(500).json({ error: 'Error saving recipe' });
             }
@@ -229,6 +258,93 @@ app.post('/api/recipes', requireAuth, (req, res) => {
                     instructions
                 }
             });
+        }
+    );
+});
+
+// Rating routes
+// Get rating info for a specific recipe
+app.get('/api/recipes/:id/rating', (req, res) => {
+    const recipeId = req.params.id;
+    const userId = req.session.userId;
+
+    // Get average rating and count
+    db.get(
+        `SELECT COALESCE(AVG(rating), 0) as average_rating, COUNT(*) as rating_count 
+         FROM ratings WHERE recipe_id = ?`,
+        [recipeId],
+        (err, ratingStats) => {
+            if (err) {
+                return res.status(500).json({ error: 'Error fetching rating' });
+            }
+
+            const response = {
+                averageRating: Math.round(ratingStats.average_rating * 10) / 10,
+                ratingCount: ratingStats.rating_count
+            };
+
+            // If user is logged in, check if they've rated this recipe
+            if (userId) {
+                db.get(
+                    'SELECT rating FROM ratings WHERE user_id = ? AND recipe_id = ?',
+                    [userId, recipeId],
+                    (err, userRating) => {
+                        if (err) {
+                            return res.status(500).json({ error: 'Error fetching user rating' });
+                        }
+                        response.userRating = userRating ? userRating.rating : null;
+                        response.hasRated = !!userRating;
+                        res.json(response);
+                    }
+                );
+            } else {
+                response.userRating = null;
+                response.hasRated = false;
+                res.json(response);
+            }
+        }
+    );
+});
+
+// Submit a rating for a recipe
+app.post('/api/recipes/:id/rating', requireAuth, (req, res) => {
+    const recipeId = req.params.id;
+    const userId = req.session.userId;
+    const { rating } = req.body;
+
+    // Validate rating
+    if (!rating || rating < 1 || rating > 5 || !Number.isInteger(rating)) {
+        return res.status(400).json({ error: 'Rating must be an integer between 1 and 5' });
+    }
+
+    // Insert or update rating (UNIQUE constraint handles duplicates)
+    db.run(
+        `INSERT INTO ratings (user_id, recipe_id, rating) VALUES (?, ?, ?)
+         ON CONFLICT(user_id, recipe_id) DO UPDATE SET rating = excluded.rating`,
+        [userId, recipeId, rating],
+        function (err) {
+            if (err) {
+                return res.status(500).json({ error: 'Error saving rating' });
+            }
+
+            // Fetch updated average
+            db.get(
+                `SELECT COALESCE(AVG(rating), 0) as average_rating, COUNT(*) as rating_count 
+                 FROM ratings WHERE recipe_id = ?`,
+                [recipeId],
+                (err, ratingStats) => {
+                    if (err) {
+                        return res.status(500).json({ error: 'Error fetching updated rating' });
+                    }
+
+                    res.json({
+                        success: true,
+                        userRating: rating,
+                        averageRating: Math.round(ratingStats.average_rating * 10) / 10,
+                        ratingCount: ratingStats.rating_count
+                    });
+                }
+            );
         }
     );
 });

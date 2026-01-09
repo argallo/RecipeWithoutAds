@@ -137,6 +137,11 @@ let searchQuery = '';
 let filteredRecipes = [];
 let selectedAutocompleteIndex = -1;
 
+// Rating state
+let userRatings = {}; // Track which recipes user has rated
+let selectedRating = 0; // Currently selected rating in modal
+let currentRatingRecipeId = null; // Recipe being rated
+
 // DOM Elements
 const recipeList = document.getElementById('recipeList');
 const recipeContent = document.getElementById('recipeContent');
@@ -172,6 +177,15 @@ const usernameDisplay = document.getElementById('usernameDisplay');
 const loginError = document.getElementById('loginError');
 const signupError = document.getElementById('signupError');
 const siteLogo = document.getElementById('siteLogo');
+
+// Rating DOM elements
+const ratingModal = document.getElementById('ratingModal');
+const starRatingInput = document.getElementById('starRatingInput');
+const selectedRatingText = document.getElementById('selectedRatingText');
+const submitRatingBtn = document.getElementById('submitRatingBtn');
+const cancelRatingBtn = document.getElementById('cancelRatingBtn');
+const recipeStars = document.getElementById('recipeStars');
+const ratingText = document.getElementById('ratingText');
 
 // Authentication state
 let currentUser = null;
@@ -383,6 +397,12 @@ function renderRandomRecipes() {
 
         content.appendChild(title);
         content.appendChild(author);
+
+        // Add rating display
+        const ratingDiv = document.createElement('div');
+        ratingDiv.innerHTML = createCardRatingHTML(recipe.averageRating || 0, recipe.ratingCount || 0);
+        content.appendChild(ratingDiv.firstChild);
+
         card.appendChild(content);
 
         randomRecipesGrid.appendChild(card);
@@ -516,6 +536,12 @@ function renderSearchResults(results) {
 
         content.appendChild(title);
         content.appendChild(author);
+
+        // Add rating display
+        const ratingDiv = document.createElement('div');
+        ratingDiv.innerHTML = createCardRatingHTML(recipe.averageRating || 0, recipe.ratingCount || 0);
+        content.appendChild(ratingDiv.firstChild);
+
         card.appendChild(content);
 
         randomRecipesGrid.appendChild(card);
@@ -753,6 +779,7 @@ async function init() {
     renderRecipeList();
     renderRandomRecipes();
     setupEventListeners();
+    setupRatingEventListeners();
     await checkAuthStatus();
 }
 
@@ -844,6 +871,11 @@ function showRecipe(recipeId) {
     renderIngredients(recipe, recipeId);
     renderInstructions(recipe, recipeId);
 
+    // Fetch and display rating
+    fetchRatingData(recipeId).then(ratingData => {
+        displayRecipeRating(ratingData.averageRating, ratingData.ratingCount, ratingData.userRating);
+    });
+
     // Hide landing page and show recipe display
     landingPage.style.display = 'none';
     recipeDisplay.classList.remove('hidden');
@@ -927,6 +959,11 @@ function renderInstructions(recipe, recipeId) {
                 state[index] = true;
                 li.classList.add('checked');
                 li.classList.remove('next-step');
+
+                // Check if this was the last step
+                if (index === recipe.instructions.length - 1) {
+                    checkRecipeCompletion(recipeId);
+                }
             } else {
                 state[index] = false;
                 li.classList.remove('checked');
@@ -1213,6 +1250,228 @@ async function addNewRecipe() {
     } catch (error) {
         console.error('Error adding recipe:', error);
         alert('An error occurred while adding the recipe');
+    }
+}
+
+// ===========================================
+// RATING FUNCTIONS
+// ===========================================
+
+// Render star icons for display (read-only)
+function renderStarsDisplay(container, rating, count) {
+    container.innerHTML = '';
+    const fullStars = Math.floor(rating);
+    const hasHalf = rating % 1 >= 0.5;
+
+    for (let i = 1; i <= 5; i++) {
+        const star = document.createElement('span');
+        star.className = 'star';
+        star.textContent = '★';
+        if (i <= fullStars) {
+            star.classList.add('filled');
+        } else if (i === fullStars + 1 && hasHalf) {
+            star.classList.add('half-filled');
+        }
+        container.appendChild(star);
+    }
+}
+
+// Create stars HTML for recipe cards
+function createCardRatingHTML(averageRating, ratingCount) {
+    if (!ratingCount || ratingCount === 0) {
+        return '<div class="recipe-card-rating"><span class="rating-count">No ratings yet</span></div>';
+    }
+
+    let starsHTML = '<div class="stars">';
+    const fullStars = Math.floor(averageRating);
+
+    for (let i = 1; i <= 5; i++) {
+        if (i <= fullStars) {
+            starsHTML += '<span class="star filled">★</span>';
+        } else {
+            starsHTML += '<span class="star">★</span>';
+        }
+    }
+    starsHTML += '</div>';
+
+    return `<div class="recipe-card-rating">${starsHTML}<span class="rating-count">${averageRating} (${ratingCount})</span></div>`;
+}
+
+// Fetch rating data for a recipe
+async function fetchRatingData(recipeId) {
+    try {
+        const response = await fetch(`/api/recipes/${recipeId}/rating`);
+        if (response.ok) {
+            const data = await response.json();
+            userRatings[recipeId] = data.hasRated;
+            return data;
+        }
+    } catch (error) {
+        console.error('Error fetching rating:', error);
+    }
+    return { averageRating: 0, ratingCount: 0, userRating: null, hasRated: false };
+}
+
+// Display rating in recipe detail view
+function displayRecipeRating(averageRating, ratingCount, userRating) {
+    renderStarsDisplay(recipeStars, averageRating, ratingCount);
+
+    if (ratingCount === 0) {
+        ratingText.textContent = 'No ratings yet';
+    } else {
+        let text = `${averageRating} out of 5 (${ratingCount} ${ratingCount === 1 ? 'rating' : 'ratings'})`;
+        if (userRating) {
+            text += ` • Your rating: ${userRating}★`;
+        }
+        ratingText.textContent = text;
+    }
+}
+
+// Show rating modal
+function showRatingModal(recipeId) {
+    currentRatingRecipeId = recipeId;
+    selectedRating = 0;
+
+    // Reset star states
+    const stars = starRatingInput.querySelectorAll('.star');
+    stars.forEach(star => {
+        star.classList.remove('selected', 'hovered');
+    });
+
+    selectedRatingText.textContent = 'Select a rating';
+    submitRatingBtn.disabled = true;
+    ratingModal.classList.remove('hidden');
+}
+
+// Hide rating modal
+function hideRatingModal() {
+    ratingModal.classList.add('hidden');
+    currentRatingRecipeId = null;
+    selectedRating = 0;
+}
+
+// Submit rating
+async function submitRating() {
+    if (!currentRatingRecipeId || selectedRating === 0) return;
+
+    try {
+        const response = await fetch(`/api/recipes/${currentRatingRecipeId}/rating`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ rating: selectedRating })
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+            // Update local tracking
+            userRatings[currentRatingRecipeId] = true;
+
+            // Update display
+            displayRecipeRating(data.averageRating, data.ratingCount, data.userRating);
+
+            // Update recipe in local array if exists
+            const recipeIndex = recipes.findIndex(r => r.id === currentRatingRecipeId);
+            if (recipeIndex !== -1) {
+                recipes[recipeIndex].averageRating = data.averageRating;
+                recipes[recipeIndex].ratingCount = data.ratingCount;
+            }
+
+            hideRatingModal();
+        } else {
+            alert(data.error || 'Failed to submit rating');
+        }
+    } catch (error) {
+        console.error('Error submitting rating:', error);
+        alert('An error occurred while submitting your rating');
+    }
+}
+
+// Get rating label based on number
+function getRatingLabel(rating) {
+    const labels = {
+        1: 'Poor',
+        2: 'Fair',
+        3: 'Good',
+        4: 'Very Good',
+        5: 'Excellent'
+    };
+    return labels[rating] || '';
+}
+
+// Setup rating event listeners
+function setupRatingEventListeners() {
+    const stars = starRatingInput.querySelectorAll('.star');
+
+    stars.forEach(star => {
+        // Hover effects
+        star.addEventListener('mouseenter', () => {
+            const rating = parseInt(star.dataset.rating);
+            stars.forEach(s => {
+                if (parseInt(s.dataset.rating) <= rating) {
+                    s.classList.add('hovered');
+                } else {
+                    s.classList.remove('hovered');
+                }
+            });
+            selectedRatingText.textContent = getRatingLabel(rating);
+        });
+
+        star.addEventListener('mouseleave', () => {
+            stars.forEach(s => s.classList.remove('hovered'));
+            if (selectedRating > 0) {
+                selectedRatingText.textContent = getRatingLabel(selectedRating);
+            } else {
+                selectedRatingText.textContent = 'Select a rating';
+            }
+        });
+
+        // Click to select
+        star.addEventListener('click', () => {
+            selectedRating = parseInt(star.dataset.rating);
+            stars.forEach(s => {
+                if (parseInt(s.dataset.rating) <= selectedRating) {
+                    s.classList.add('selected');
+                } else {
+                    s.classList.remove('selected');
+                }
+            });
+            selectedRatingText.textContent = getRatingLabel(selectedRating);
+            submitRatingBtn.disabled = false;
+        });
+    });
+
+    // Submit button
+    submitRatingBtn.addEventListener('click', submitRating);
+
+    // Cancel button
+    cancelRatingBtn.addEventListener('click', hideRatingModal);
+
+    // Close on background click
+    ratingModal.addEventListener('click', (e) => {
+        if (e.target === ratingModal) {
+            hideRatingModal();
+        }
+    });
+}
+
+// Check if all instructions are complete and trigger rating modal if needed
+function checkRecipeCompletion(recipeId) {
+    if (!isAuthenticated) return;
+
+    const state = recipeState[recipeId];
+    if (!state) return;
+
+    // Check if all instructions are checked
+    const allComplete = state.instructions.every(checked => checked);
+
+    if (allComplete && !userRatings[recipeId]) {
+        // Show rating modal after a brief delay
+        setTimeout(() => {
+            showRatingModal(recipeId);
+        }, 500);
     }
 }
 

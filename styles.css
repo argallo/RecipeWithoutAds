@@ -1040,3 +1040,131 @@ body {
         grid-template-columns: 1fr;
     }
 }
+
+/* Star Rating Styles */
+.recipe-rating-display {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.recipe-rating-display .stars {
+    display: flex;
+    gap: 2px;
+}
+
+.recipe-rating-display .star {
+    color: #ddd;
+    font-size: 18px;
+    line-height: 1;
+}
+
+.recipe-rating-display .star.filled {
+    color: #ffc107;
+}
+
+.recipe-rating-display .star.half-filled {
+    background: linear-gradient(90deg, #ffc107 50%, #ddd 50%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+.recipe-rating-display .rating-text {
+    color: #666;
+    font-size: 14px;
+}
+
+/* Recipe Card Rating */
+.recipe-card-rating {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 8px;
+}
+
+.recipe-card-rating .stars {
+    display: flex;
+    gap: 1px;
+}
+
+.recipe-card-rating .star {
+    color: #ddd;
+    font-size: 14px;
+    line-height: 1;
+}
+
+.recipe-card-rating .star.filled {
+    color: #ffc107;
+}
+
+.recipe-card-rating .rating-count {
+    color: #888;
+    font-size: 12px;
+}
+
+/* Rating Modal */
+.rating-modal {
+    max-width: 400px;
+    text-align: center;
+}
+
+.rating-modal h2 {
+    margin-bottom: 10px;
+    color: #2c3e50;
+}
+
+.rating-prompt {
+    color: #666;
+    margin-bottom: 25px;
+    font-size: 15px;
+}
+
+.star-rating-input {
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+    margin-bottom: 15px;
+}
+
+.star-rating-input .star {
+    font-size: 40px;
+    color: #ddd;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    line-height: 1;
+}
+
+.star-rating-input .star:hover,
+.star-rating-input .star.hovered {
+    color: #ffca28;
+    transform: scale(1.15);
+}
+
+.star-rating-input .star.selected {
+    color: #ffc107;
+}
+
+.selected-rating-text {
+    color: #666;
+    font-size: 14px;
+    margin-bottom: 20px;
+    min-height: 21px;
+}
+
+.rating-modal .modal-buttons {
+    justify-content: center;
+}
+
+.rating-modal .btn-primary:disabled {
+    background: #ccc;
+    cursor: not-allowed;
+    box-shadow: none;
+    transform: none;
+}
+
+.rating-modal .btn-primary:disabled:hover {
+    transform: none;
+    box-shadow: none;
+}
