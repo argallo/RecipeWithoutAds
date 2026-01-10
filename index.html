@@ -49,8 +49,8 @@
                                 placeholder="Search recipes or authors...">
                             <button class="landing-search-clear-btn" id="landingSearchClearBtn"
                                 aria-label="Clear search">&times;</button>
+                            <div class="landing-autocomplete-dropdown" id="landingAutocompleteDropdown"></div>
                         </div>
-                        <div class="landing-autocomplete-dropdown" id="landingAutocompleteDropdown"></div>
                     </div>
                     <div class="random-recipes-section">
                         <h2>Try These Recipes</h2>
@@ -70,7 +70,10 @@
                             <span class="rating-text" id="ratingText"></span>
                         </div>
                     </div>
-                    <button class="reset-btn" id="resetBtn">Reset Progress</button>
+                    <div class="recipe-actions">
+                        <button class="add-to-folder-btn hidden" id="addToFolderBtn">Add to Folder</button>
+                        <button class="reset-btn" id="resetBtn">Reset Progress</button>
+                    </div>
                 </div>
 
                 <div class="recipe-media">
@@ -211,6 +214,37 @@
                     Already have an account? <button type="button" class="link-btn" id="showLoginBtn">Login</button>
                 </div>
             </form>
+        </div>
+    </div>
+
+    <!-- Create Folder Modal -->
+    <div id="createFolderModal" class="modal hidden">
+        <div class="modal-content folder-modal">
+            <h2>Create New Folder</h2>
+            <form id="createFolderForm">
+                <label for="folderName">Folder Name:</label>
+                <input type="text" id="folderName" required maxlength="50">
+                <div class="folder-error" id="folderError"></div>
+                <div class="modal-buttons">
+                    <button type="submit" class="btn-primary">Create</button>
+                    <button type="button" class="btn-secondary" id="cancelCreateFolderBtn">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Add to Folder Modal -->
+    <div id="addToFolderModal" class="modal hidden">
+        <div class="modal-content folder-modal">
+            <h2>Add to Folder</h2>
+            <p class="folder-prompt">Select folders for this recipe:</p>
+            <div id="folderCheckboxList" class="folder-checkbox-list">
+                <!-- Dynamically populated -->
+            </div>
+            <div class="modal-buttons">
+                <button type="button" class="btn-primary" id="saveFoldersBtn">Save</button>
+                <button type="button" class="btn-secondary" id="cancelFoldersBtn">Cancel</button>
+            </div>
         </div>
     </div>
 

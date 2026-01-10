@@ -127,6 +127,9 @@ const sampleRecipes = [
 // User recipes (for authenticated users)
 let recipes = [];
 
+// All recipes from database (for home page search)
+let allRecipes = [];
+
 let currentRecipeId = null;
 
 // Track checkbox state for each recipe
@@ -187,12 +190,81 @@ const cancelRatingBtn = document.getElementById('cancelRatingBtn');
 const recipeStars = document.getElementById('recipeStars');
 const ratingText = document.getElementById('ratingText');
 
+// Folder DOM elements
+const addToFolderBtn = document.getElementById('addToFolderBtn');
+const addToFolderModal = document.getElementById('addToFolderModal');
+const folderCheckboxList = document.getElementById('folderCheckboxList');
+const saveFoldersBtn = document.getElementById('saveFoldersBtn');
+const cancelFoldersBtn = document.getElementById('cancelFoldersBtn');
+const createFolderModal = document.getElementById('createFolderModal');
+const createFolderForm = document.getElementById('createFolderForm');
+const folderNameInput = document.getElementById('folderName');
+const folderError = document.getElementById('folderError');
+const cancelCreateFolderBtn = document.getElementById('cancelCreateFolderBtn');
+
 // Authentication state
 let currentUser = null;
 let isAuthenticated = false;
 
+// Folder state
+let folders = [];
+let currentFolderId = null;
+let currentFolderName = '';
+
+// Guest history (localStorage)
+let localHistory = [];
+const HISTORY_KEY = 'recipe_history';
+const MAX_HISTORY = 20;
+
+// localStorage history helper functions
+function getLocalHistory() {
+    try {
+        const stored = localStorage.getItem(HISTORY_KEY);
+        return stored ? JSON.parse(stored) : [];
+    } catch (error) {
+        console.error('Error reading history from localStorage:', error);
+        return [];
+    }
+}
+
+function addToLocalHistory(recipeId) {
+    try {
+        let history = getLocalHistory();
+
+        // Remove if already exists to move to front
+        history = history.filter(id => id !== recipeId);
+
+        // Add to front
+        history.unshift(recipeId);
+
+        // Keep only max 20
+        if (history.length > MAX_HISTORY) {
+            history = history.slice(0, MAX_HISTORY);
+        }
+
+        localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+        localHistory = history;
+    } catch (error) {
+        console.error('Error saving history to localStorage:', error);
+    }
+}
+
+function clearLocalHistory() {
+    try {
+        localStorage.removeItem(HISTORY_KEY);
+        localHistory = [];
+    } catch (error) {
+        console.error('Error clearing history from localStorage:', error);
+    }
+}
+
 // Get current recipes based on authentication status
-function getCurrentRecipes() {
+// If useAllRecipes is true, returns all recipes from database for searching
+function getCurrentRecipes(useAllRecipes = false) {
+    // If requesting all recipes for search
+    if (useAllRecipes && isAuthenticated && allRecipes.length > 0) {
+        return allRecipes;
+    }
     // If authenticated but no recipes yet, show sample recipes
     if (isAuthenticated && recipes.length === 0) {
         return sampleRecipes;
@@ -226,6 +298,210 @@ function closeSidebar() {
     menuToggleBtn.classList.remove('active');
 }
 
+// Folder Management Functions
+
+async function loadFolders() {
+    try {
+        // Load all recipes for home page search
+        const recipesResponse = await fetch('/api/recipes');
+        if (recipesResponse.ok) {
+            const recipesData = await recipesResponse.json();
+            allRecipes = recipesData.recipes;
+        }
+
+        const response = await fetch('/api/folders');
+        if (response.ok) {
+            const data = await response.json();
+            folders = data.folders;
+
+            // Find History folder and load its recipes
+            const historyFolder = folders.find(f => f.name === 'History' && f.is_system === 1);
+            if (historyFolder) {
+                await showFolder(historyFolder.id, 'History');
+            } else {
+                renderRecipeList();
+            }
+        }
+    } catch (error) {
+        console.error('Error loading folders:', error);
+    }
+}
+
+async function showFolder(folderId, folderName) {
+    currentFolderId = folderId;
+    currentFolderName = folderName;
+
+    try {
+        const response = await fetch(`/api/folders/${folderId}/recipes`);
+        if (response.ok) {
+            const data = await response.json();
+            recipes = data.recipes;
+            renderRecipeList();
+        }
+    } catch (error) {
+        console.error('Error loading folder recipes:', error);
+    }
+}
+
+async function createFolder(name) {
+    try {
+        const response = await fetch('/api/folders', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ name })
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+            folders.push(data.folder);
+            renderRecipeList();
+            return true;
+        } else {
+            alert(data.error || 'Error creating folder');
+            return false;
+        }
+    } catch (error) {
+        console.error('Error creating folder:', error);
+        alert('Error creating folder');
+        return false;
+    }
+}
+
+async function deleteFolder(folderId) {
+    if (!confirm('Are you sure you want to delete this folder? All recipes will remain, but this folder will be removed.')) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/folders/${folderId}`, {
+            method: 'DELETE'
+        });
+
+        if (response.ok) {
+            folders = folders.filter(f => f.id !== folderId);
+
+            // If current folder was deleted, switch to History
+            if (currentFolderId === folderId) {
+                const historyFolder = folders.find(f => f.name === 'History');
+                if (historyFolder) {
+                    showFolder(historyFolder.id, 'History');
+                } else {
+                    currentFolderId = null;
+                    renderRecipeList();
+                }
+            } else {
+                renderRecipeList();
+            }
+        } else {
+            const data = await response.json();
+            alert(data.error || 'Error deleting folder');
+        }
+    } catch (error) {
+        console.error('Error deleting folder:', error);
+        alert('Error deleting folder');
+    }
+}
+
+async function handleAddToFolder(folderId) {
+    if (!currentRecipeId) return;
+
+    try {
+        const response = await fetch(`/api/folders/${folderId}/recipes`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ recipeId: currentRecipeId })
+        });
+
+        if (response.ok) {
+            // Success
+            return true;
+        } else {
+            const data = await response.json();
+            console.error('Error adding to folder:', data.error);
+            return false;
+        }
+    } catch (error) {
+        console.error('Error adding to folder:', error);
+        return false;
+    }
+}
+
+async function removeFromFolder(folderId, recipeId) {
+    try {
+        const response = await fetch(`/api/folders/${folderId}/recipes/${recipeId}`, {
+            method: 'DELETE'
+        });
+
+        if (response.ok) {
+            // If currently viewing this folder, refresh
+            if (currentFolderId === folderId) {
+                showFolder(folderId, currentFolderName);
+            }
+            return true;
+        } else {
+            return false;
+        }
+    } catch (error) {
+        console.error('Error removing from folder:', error);
+        return false;
+    }
+}
+
+async function addToHistory(recipe) {
+    if (!isAuthenticated) {
+        addToLocalHistory(recipe.id);
+        return;
+    }
+
+    // Find History folder
+    const historyFolder = folders.find(f => f.name === 'History' && f.is_system === 1);
+    if (!historyFolder) {
+        console.error('History folder not found');
+        return;
+    }
+
+    // Silently add to history folder
+    try {
+        await fetch(`/api/folders/${historyFolder.id}/recipes`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ recipeId: recipe.id })
+        });
+    } catch (error) {
+        console.error('Error adding to history:', error);
+    }
+}
+
+async function syncHistoryToBackend() {
+    const history = getLocalHistory();
+    if (history.length === 0) {
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/history/transfer', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ recipeIds: history })
+        });
+
+        if (response.ok) {
+            clearLocalHistory();
+        }
+    } catch (error) {
+        console.error('Error syncing history to backend:', error);
+    }
+}
+
 // Search and filter recipes
 function filterRecipes(query) {
     const currentRecipes = getCurrentRecipes();
@@ -235,6 +511,21 @@ function filterRecipes(query) {
 
     const lowerQuery = query.toLowerCase();
     return currentRecipes.filter(recipe => {
+        const nameMatch = recipe.name.toLowerCase().includes(lowerQuery);
+        const authorMatch = recipe.author.toLowerCase().includes(lowerQuery);
+        return nameMatch || authorMatch;
+    });
+}
+
+// Search and filter ALL recipes (for landing page search)
+function filterAllRecipes(query) {
+    const allRecipesToSearch = getCurrentRecipes(true);
+    if (!query || query.trim() === '') {
+        return allRecipesToSearch;
+    }
+
+    const lowerQuery = query.toLowerCase();
+    return allRecipesToSearch.filter(recipe => {
         const nameMatch = recipe.name.toLowerCase().includes(lowerQuery);
         const authorMatch = recipe.author.toLowerCase().includes(lowerQuery);
         return nameMatch || authorMatch;
@@ -358,15 +649,17 @@ function updateSearch() {
 }
 
 // Get random recipes
-function getRandomRecipes(count) {
-    const currentRecipes = getCurrentRecipes();
+// Set useAllRecipes to true for landing page to search all recipes regardless of selected folder
+function getRandomRecipes(count, useAllRecipes = false) {
+    const currentRecipes = getCurrentRecipes(useAllRecipes);
     const shuffled = [...currentRecipes].sort(() => 0.5 - Math.random());
     return shuffled.slice(0, Math.min(count, currentRecipes.length));
 }
 
 // Render random recipe cards
 function renderRandomRecipes() {
-    const randomRecipes = getRandomRecipes(3);
+    // Always use all recipes for landing page, not just current folder
+    const randomRecipes = getRandomRecipes(3, true);
     randomRecipesGrid.innerHTML = '';
 
     randomRecipes.forEach(recipe => {
@@ -451,7 +744,7 @@ function handleLandingSearchInput(e) {
         return;
     }
 
-    const filtered = filterRecipes(query);
+    const filtered = filterAllRecipes(query);
     renderLandingAutocomplete(filtered);
 }
 
@@ -460,7 +753,7 @@ function handleLandingSearchKeydown(e) {
 
     if (query === '') return;
 
-    const filtered = filterRecipes(query);
+    const filtered = filterAllRecipes(query);
     const suggestions = filtered.slice(0, 5);
 
     if (e.key === 'ArrowDown') {
@@ -604,7 +897,7 @@ async function checkAuthStatus() {
             currentUser = data.user;
             isAuthenticated = true;
             updateAuthUI();
-            await loadRecipes();
+            await loadFolders();
         } else {
             isAuthenticated = false;
             currentUser = null;
@@ -652,7 +945,8 @@ async function handleLogin(e) {
             updateAuthUI();
             loginModal.classList.add('hidden');
             loginForm.reset();
-            await loadRecipes();
+            await syncHistoryToBackend();
+            await loadFolders();
         } else {
             loginError.textContent = data.error || 'Login failed';
         }
@@ -687,7 +981,8 @@ async function handleSignup(e) {
             updateAuthUI();
             signupModal.classList.add('hidden');
             signupForm.reset();
-            await loadRecipes();
+            await syncHistoryToBackend();
+            await loadFolders();
         } else {
             signupError.textContent = data.error || 'Signup failed';
         }
@@ -711,6 +1006,9 @@ async function handleLogout() {
             searchQuery = '';
             searchInput.value = '';
             filteredRecipes = [];
+            folders = [];
+            currentFolderId = null;
+            currentFolderName = '';
             updateAuthUI();
             renderRecipeList();
             renderRandomRecipes();
@@ -727,6 +1025,7 @@ async function handleLogout() {
 async function loadRecipes() {
     if (!isAuthenticated) {
         recipes = [];
+        allRecipes = [];
         filteredRecipes = [];
         renderRecipeList();
         renderRandomRecipes();
@@ -738,6 +1037,7 @@ async function loadRecipes() {
         if (response.ok) {
             const data = await response.json();
             recipes = data.recipes;
+            allRecipes = data.recipes; // Store all recipes for home search
             filteredRecipes = [];
             searchQuery = '';
             searchInput.value = '';
@@ -784,37 +1084,161 @@ async function init() {
 }
 
 // Render recipe list
+// Sidebar rendering (routes to folder or guest history view)
 function renderRecipeList() {
-    recipeList.innerHTML = '';
-    const currentRecipes = getCurrentRecipes();
-    const recipesToShow = searchQuery.trim() === '' ? currentRecipes : filteredRecipes;
+    if (isAuthenticated) {
+        renderFolderList();
+    } else {
+        renderGuestHistory();
+    }
+}
 
-    if (recipesToShow.length === 0) {
-        const li = document.createElement('li');
-        li.textContent = 'No recipes found';
-        li.style.textAlign = 'center';
-        li.style.color = '#999';
-        li.style.cursor = 'default';
-        recipeList.appendChild(li);
+// Render folder list for logged-in users
+function renderFolderList() {
+    recipeList.innerHTML = '';
+
+    // Add "New Folder" button
+    const newFolderBtn = document.createElement('button');
+    newFolderBtn.className = 'new-folder-btn';
+    newFolderBtn.textContent = '+ New Folder';
+    newFolderBtn.addEventListener('click', showCreateFolderModal);
+    recipeList.appendChild(newFolderBtn);
+
+    // Render each folder
+    folders.forEach(folder => {
+        const folderItem = document.createElement('div');
+        folderItem.className = 'folder-section';
+
+        // Folder header
+        const folderHeader = document.createElement('div');
+        folderHeader.className = 'folder-header';
+        if (folder.id === currentFolderId) {
+            folderHeader.classList.add('active');
+        }
+
+        // Folder info
+        const folderInfo = document.createElement('div');
+        folderInfo.className = 'folder-info';
+
+        const folderName = document.createElement('span');
+        folderName.className = 'folder-name';
+        folderName.textContent = folder.name;
+
+        const folderCount = document.createElement('span');
+        folderCount.className = 'folder-count';
+        folderCount.textContent = `(${folder.recipe_count})`;
+
+        folderInfo.appendChild(folderName);
+        folderInfo.appendChild(folderCount);
+
+        folderHeader.appendChild(folderInfo);
+
+        // Delete button for custom folders
+        if (folder.is_system === 0) {
+            const deleteBtn = document.createElement('button');
+            deleteBtn.className = 'folder-delete-btn';
+            deleteBtn.innerHTML = '&times;';
+            deleteBtn.title = 'Delete folder';
+            deleteBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                deleteFolder(folder.id);
+            });
+            folderHeader.appendChild(deleteBtn);
+        }
+
+        // Click to show folder
+        folderHeader.addEventListener('click', () => {
+            showFolder(folder.id, folder.name);
+        });
+
+        folderItem.appendChild(folderHeader);
+
+        // If this is the current folder, show recipes
+        if (folder.id === currentFolderId && recipes.length > 0) {
+            const folderRecipes = document.createElement('div');
+            folderRecipes.className = 'folder-recipes';
+
+            const ul = document.createElement('ul');
+            ul.className = 'recipe-list';
+
+            recipes.forEach(recipe => {
+                const li = document.createElement('li');
+                li.textContent = recipe.name;
+                li.dataset.id = recipe.id;
+                if (recipe.id === currentRecipeId) {
+                    li.classList.add('active');
+                }
+                li.addEventListener('click', () => showRecipe(recipe.id));
+                ul.appendChild(li);
+            });
+
+            folderRecipes.appendChild(ul);
+            folderItem.appendChild(folderRecipes);
+        }
+
+        recipeList.appendChild(folderItem);
+    });
+
+    // Show empty state if current folder has no recipes
+    if (currentFolderId && recipes.length === 0) {
+        const emptyMsg = document.createElement('p');
+        emptyMsg.className = 'history-empty';
+        emptyMsg.textContent = currentFolderName === 'History'
+            ? 'No recipes in history yet. Click a recipe to add it!'
+            : currentFolderName === 'Favorites'
+                ? 'No favorites yet. Use "Add to Folder" to add recipes!'
+                : 'No recipes in this folder yet.';
+        recipeList.appendChild(emptyMsg);
+    }
+}
+
+// Render guest history from localStorage
+function renderGuestHistory() {
+    recipeList.innerHTML = '';
+
+    const header = document.createElement('h3');
+    header.className = 'history-header';
+    header.textContent = 'History';
+    recipeList.appendChild(header);
+
+    const history = getLocalHistory();
+
+    if (history.length === 0) {
+        const emptyMsg = document.createElement('p');
+        emptyMsg.className = 'history-empty';
+        emptyMsg.textContent = 'No history yet. Click a recipe to get started!';
+        recipeList.appendChild(emptyMsg);
         return;
     }
 
-    recipesToShow.forEach(recipe => {
-        const li = document.createElement('li');
-        li.textContent = recipe.name;
-        li.dataset.id = recipe.id;
-        if (recipe.id === currentRecipeId) {
-            li.classList.add('active');
+    const ul = document.createElement('ul');
+    ul.className = 'recipe-list';
+
+    history.forEach(recipeId => {
+        // Find recipe in sampleRecipes
+        const recipe = sampleRecipes.find(r => r.id === recipeId);
+        if (recipe) {
+            const li = document.createElement('li');
+            li.textContent = recipe.name;
+            li.dataset.id = recipe.id;
+            if (recipe.id === currentRecipeId) {
+                li.classList.add('active');
+            }
+            li.addEventListener('click', () => showRecipe(recipe.id));
+            ul.appendChild(li);
         }
-        li.addEventListener('click', () => showRecipe(recipe.id));
-        recipeList.appendChild(li);
     });
+
+    recipeList.appendChild(ul);
 }
 
 // Show recipe details
 function showRecipe(recipeId) {
-    const currentRecipes = getCurrentRecipes();
-    const recipe = currentRecipes.find(r => r.id === recipeId);
+    // First try to find in current recipes, then in all recipes
+    let recipe = getCurrentRecipes().find(r => r.id === recipeId);
+    if (!recipe) {
+        recipe = getCurrentRecipes(true).find(r => r.id === recipeId);
+    }
     if (!recipe) return;
 
     currentRecipeId = recipeId;
@@ -884,6 +1308,16 @@ function showRecipe(recipeId) {
 
     // Close sidebar on mobile when recipe is selected
     closeSidebar();
+
+    // Track in history
+    addToHistory(recipe);
+
+    // Show "Add to Folder" button for authenticated users
+    if (isAuthenticated) {
+        addToFolderBtn.classList.remove('hidden');
+    } else {
+        addToFolderBtn.classList.add('hidden');
+    }
 }
 
 // Render ingredients with checkboxes
@@ -1050,6 +1484,118 @@ function goToHome(e) {
 }
 
 // Setup event listeners
+// Folder Modal Functions
+
+function showCreateFolderModal() {
+    folderError.textContent = '';
+    createFolderForm.reset();
+    createFolderModal.classList.remove('hidden');
+}
+
+async function handleCreateFolder(e) {
+    e.preventDefault();
+    const name = folderNameInput.value.trim();
+
+    if (!name) {
+        folderError.textContent = 'Folder name is required';
+        return;
+    }
+
+    if (name === 'Favorites' || name === 'History') {
+        folderError.textContent = 'Cannot use reserved folder names';
+        return;
+    }
+
+    const success = await createFolder(name);
+    if (success) {
+        createFolderModal.classList.add('hidden');
+        createFolderForm.reset();
+        folderError.textContent = '';
+    }
+}
+
+async function showAddToFolderModal() {
+    if (!currentRecipeId) return;
+
+    // Get which folders currently contain this recipe
+    const recipeFolderIds = await getRecipeFolders(currentRecipeId);
+
+    // Populate checkbox list (exclude History folder - it's automatic)
+    folderCheckboxList.innerHTML = '';
+
+    folders.filter(folder => folder.name !== 'History').forEach(folder => {
+        const item = document.createElement('div');
+        item.className = 'folder-checkbox-item';
+
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.id = `folder-${folder.id}`;
+        checkbox.value = folder.id;
+        checkbox.checked = recipeFolderIds.includes(folder.id);
+        checkbox.dataset.initiallyChecked = checkbox.checked;
+
+        const label = document.createElement('label');
+        label.htmlFor = `folder-${folder.id}`;
+        label.className = 'folder-checkbox-label';
+        label.textContent = folder.name;
+
+        item.appendChild(checkbox);
+        item.appendChild(label);
+        folderCheckboxList.appendChild(item);
+    });
+
+    addToFolderModal.classList.remove('hidden');
+}
+
+async function getRecipeFolders(recipeId) {
+    // Return array of folder IDs that contain this recipe
+    const recipeFolderIds = [];
+    for (const folder of folders) {
+        try {
+            const response = await fetch(`/api/folders/${folder.id}/recipes`);
+            if (response.ok) {
+                const data = await response.json();
+                if (data.recipes.some(r => r.id === recipeId)) {
+                    recipeFolderIds.push(folder.id);
+                }
+            }
+        } catch (error) {
+            console.error('Error checking folder:', error);
+        }
+    }
+    return recipeFolderIds;
+}
+
+async function handleSaveFolders() {
+    const checkboxes = folderCheckboxList.querySelectorAll('input[type="checkbox"]');
+    let changes = [];
+
+    for (const checkbox of checkboxes) {
+        const folderId = parseInt(checkbox.value);
+        const isChecked = checkbox.checked;
+        const wasChecked = checkbox.dataset.initiallyChecked === 'true';
+
+        if (isChecked && !wasChecked) {
+            // Add to folder
+            changes.push(handleAddToFolder(folderId));
+        } else if (!isChecked && wasChecked) {
+            // Remove from folder
+            changes.push(removeFromFolder(folderId, currentRecipeId));
+        }
+    }
+
+    await Promise.all(changes);
+    addToFolderModal.classList.add('hidden');
+
+    // Reload folders to update recipe counts
+    await loadFolders();
+
+    // Show "Add to Folder" button if authenticated
+    if (isAuthenticated) {
+        addToFolderBtn.classList.remove('hidden');
+    }
+}
+
 function setupEventListeners() {
     // Site logo home link
     siteLogo.addEventListener('click', goToHome);
@@ -1147,6 +1693,27 @@ function setupEventListeners() {
     showSignupBtn.addEventListener('click', switchToSignup);
     showLoginBtn.addEventListener('click', switchToLogin);
 
+    // Folder event listeners
+    addToFolderBtn.addEventListener('click', () => {
+        if (!isAuthenticated) {
+            showLoginModal();
+            return;
+        }
+        showAddToFolderModal();
+    });
+
+    saveFoldersBtn.addEventListener('click', handleSaveFolders);
+    cancelFoldersBtn.addEventListener('click', () => {
+        addToFolderModal.classList.add('hidden');
+    });
+
+    createFolderForm.addEventListener('submit', handleCreateFolder);
+    cancelCreateFolderBtn.addEventListener('click', () => {
+        createFolderModal.classList.add('hidden');
+        createFolderForm.reset();
+        folderError.textContent = '';
+    });
+
     // Close modals when clicking outside
     loginModal.addEventListener('click', (e) => {
         if (e.target === loginModal) {
@@ -1161,6 +1728,20 @@ function setupEventListeners() {
             signupModal.classList.add('hidden');
             signupForm.reset();
             signupError.textContent = '';
+        }
+    });
+
+    addToFolderModal.addEventListener('click', (e) => {
+        if (e.target === addToFolderModal) {
+            addToFolderModal.classList.add('hidden');
+        }
+    });
+
+    createFolderModal.addEventListener('click', (e) => {
+        if (e.target === createFolderModal) {
+            createFolderModal.classList.add('hidden');
+            createFolderForm.reset();
+            folderError.textContent = '';
         }
     });
 }
