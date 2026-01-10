@@ -284,6 +284,196 @@ function getYouTubeVideoId(url) {
     return (match && match[2].length === 11) ? match[2] : null;
 }
 
+// ============================================
+// ROUTING FUNCTIONS
+// ============================================
+
+// Generate URL slug from recipe name
+function generateSlug(name) {
+    return name
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')  // Replace non-alphanumeric with dashes
+        .replace(/^-+|-+$/g, '');      // Remove leading/trailing dashes
+}
+
+// Get recipe URL path
+function getRecipeUrl(recipe) {
+    const slug = generateSlug(recipe.name);
+    return `/recipe/${slug}-${recipe.id}`;
+}
+
+// Extract recipe ID from URL path
+function extractRecipeId(path) {
+    // Match pattern: /recipe/{slug}-{id}
+    const match = path.match(/\/recipe\/.*-(\d+)$/);
+    return match ? parseInt(match[1]) : null;
+}
+
+// Navigate to a route and update browser history
+function navigateTo(path, state = {}, replaceState = false) {
+    if (replaceState) {
+        window.history.replaceState(state, '', path);
+    } else {
+        window.history.pushState(state, '', path);
+    }
+    handleRoute(path);
+}
+
+// Handle route changes
+function handleRoute(path) {
+    // Parse the path
+    const pathParts = path.split('/').filter(p => p);
+
+    if (pathParts.length === 0 || pathParts[0] === 'home') {
+        // Home page
+        showHomePage();
+    } else if (pathParts[0] === 'recipe') {
+        // Recipe page - extract ID from slug
+        const recipeId = extractRecipeId(path);
+        if (recipeId) {
+            showRecipeById(recipeId, false); // false = don't push state again
+        } else {
+            // Invalid recipe URL, redirect to home
+            navigateTo('/home', {}, true);
+        }
+    } else {
+        // Unknown route, redirect to home
+        navigateTo('/home', {}, true);
+    }
+}
+
+// Show home page without changing URL
+function showHomePage() {
+    // Hide recipe display and show landing page
+    recipeDisplay.classList.add('hidden');
+    landingPage.style.display = 'block';
+
+    // Clear current recipe
+    currentRecipeId = null;
+
+    // Clear searches
+    searchQuery = '';
+    searchInput.value = '';
+    searchClearBtn.classList.remove('visible');
+    filteredRecipes = [];
+
+    landingSearch.value = '';
+    landingSearchClearBtn.classList.remove('visible');
+    selectedLandingAutocompleteIndex = -1;
+    landingAutocompleteDropdown.classList.remove('active');
+
+    // Restore random recipes
+    const randomRecipesSection = document.querySelector('.random-recipes-section');
+    if (randomRecipesSection) {
+        const heading = randomRecipesSection.querySelector('h2');
+        heading.textContent = 'Try These Recipes';
+        renderRandomRecipes();
+    }
+
+    // Update recipe list highlighting
+    renderRecipeList();
+
+    // Close mobile sidebar if open
+    closeSidebar();
+}
+
+// Show recipe by ID without changing URL (for popstate)
+function showRecipeById(recipeId, pushState = true) {
+    // First try to find in current recipes, then in all recipes
+    let recipe = getCurrentRecipes().find(r => r.id === recipeId);
+    if (!recipe) {
+        recipe = getCurrentRecipes(true).find(r => r.id === recipeId);
+    }
+    if (!recipe) {
+        console.error('Recipe not found:', recipeId);
+        navigateTo('/home', {}, true);
+        return;
+    }
+
+    if (pushState) {
+        const recipeUrl = getRecipeUrl(recipe);
+        navigateTo(recipeUrl, { recipeId });
+    }
+
+    currentRecipeId = recipeId;
+
+    // Initialize state for this recipe if it doesn't exist
+    if (!recipeState[recipeId]) {
+        recipeState[recipeId] = {
+            ingredients: new Array(recipe.ingredients.length).fill(false),
+            instructions: new Array(recipe.instructions.length).fill(false)
+        };
+    }
+
+    document.getElementById('recipeTitle').textContent = recipe.name;
+    document.getElementById('recipeAuthor').textContent = recipe.author;
+
+    // Display source information
+    const recipeSourceElement = document.getElementById('recipeSource');
+    if (recipe.source) {
+        if (recipe.source.type === 'youtube') {
+            recipeSourceElement.innerHTML = 'Source: YouTube';
+        } else if (recipe.source.type === 'cookbook') {
+            recipeSourceElement.innerHTML = `Source: <a href="${recipe.source.amazonLink}" target="_blank" rel="noopener">${recipe.source.bookName}</a>`;
+        } else if (recipe.source.type === 'manual') {
+            recipeSourceElement.textContent = 'Source: Manually Entered';
+        }
+    } else {
+        recipeSourceElement.textContent = '';
+    }
+
+    // Display image
+    const recipeImage = document.getElementById('recipeImage');
+    if (recipe.image) {
+        recipeImage.src = recipe.image;
+        recipeImage.classList.add('visible');
+    } else {
+        recipeImage.classList.remove('visible');
+    }
+
+    // Display YouTube video if source is YouTube
+    const recipeVideo = document.getElementById('recipeVideo');
+    if (recipe.source && recipe.source.type === 'youtube' && recipe.source.youtubeUrl) {
+        const videoId = getYouTubeVideoId(recipe.source.youtubeUrl);
+        if (videoId) {
+            recipeVideo.innerHTML = `<iframe src="https://www.youtube.com/embed/${videoId}" allowfullscreen></iframe>`;
+            recipeVideo.classList.remove('hidden');
+        } else {
+            recipeVideo.classList.add('hidden');
+        }
+    } else {
+        recipeVideo.innerHTML = '';
+        recipeVideo.classList.add('hidden');
+    }
+
+    renderIngredients(recipe, recipeId);
+    renderInstructions(recipe, recipeId);
+
+    // Fetch and display rating
+    fetchRatingData(recipeId).then(ratingData => {
+        displayRecipeRating(ratingData.averageRating, ratingData.ratingCount, ratingData.userRating);
+    });
+
+    // Hide landing page and show recipe display
+    landingPage.style.display = 'none';
+    recipeDisplay.classList.remove('hidden');
+
+    renderRecipeList();
+
+    // Close sidebar on mobile when recipe is selected
+    closeSidebar();
+
+    // Track in history
+    addToHistory(recipe);
+
+    // Show "Add to Folder" button for authenticated users
+    if (isAuthenticated) {
+        addToFolderBtn.classList.remove('hidden');
+    } else {
+        addToFolderBtn.classList.add('hidden');
+    }
+}
+
 // Toggle sidebar for mobile
 function toggleSidebar() {
     sidebar.classList.toggle('active');
@@ -1076,11 +1266,24 @@ function switchToLogin() {
 // Initialize
 async function init() {
     filteredRecipes = [];
-    renderRecipeList();
-    renderRandomRecipes();
     setupEventListeners();
     setupRatingEventListeners();
     await checkAuthStatus();
+
+    // Handle initial route
+    const path = window.location.pathname;
+    if (path === '/' || path === '') {
+        // Redirect to /home
+        navigateTo('/home', {}, true);
+    } else {
+        // Load the current route
+        handleRoute(path);
+    }
+
+    // Listen for back/forward button
+    window.addEventListener('popstate', (e) => {
+        handleRoute(window.location.pathname);
+    });
 }
 
 // Render recipe list
@@ -1233,91 +1436,9 @@ function renderGuestHistory() {
 }
 
 // Show recipe details
+// Show recipe details (wrapper for routing)
 function showRecipe(recipeId) {
-    // First try to find in current recipes, then in all recipes
-    let recipe = getCurrentRecipes().find(r => r.id === recipeId);
-    if (!recipe) {
-        recipe = getCurrentRecipes(true).find(r => r.id === recipeId);
-    }
-    if (!recipe) return;
-
-    currentRecipeId = recipeId;
-
-    // Initialize state for this recipe if it doesn't exist
-    if (!recipeState[recipeId]) {
-        recipeState[recipeId] = {
-            ingredients: new Array(recipe.ingredients.length).fill(false),
-            instructions: new Array(recipe.instructions.length).fill(false)
-        };
-    }
-
-    document.getElementById('recipeTitle').textContent = recipe.name;
-    document.getElementById('recipeAuthor').textContent = recipe.author;
-
-    // Display source information
-    const recipeSourceElement = document.getElementById('recipeSource');
-    if (recipe.source) {
-        if (recipe.source.type === 'youtube') {
-            recipeSourceElement.innerHTML = 'Source: YouTube';
-        } else if (recipe.source.type === 'cookbook') {
-            recipeSourceElement.innerHTML = `Source: <a href="${recipe.source.amazonLink}" target="_blank" rel="noopener">${recipe.source.bookName}</a>`;
-        } else if (recipe.source.type === 'manual') {
-            recipeSourceElement.textContent = 'Source: Manually Entered';
-        }
-    } else {
-        recipeSourceElement.textContent = '';
-    }
-
-    // Display image
-    const recipeImage = document.getElementById('recipeImage');
-    if (recipe.image) {
-        recipeImage.src = recipe.image;
-        recipeImage.classList.add('visible');
-    } else {
-        recipeImage.classList.remove('visible');
-    }
-
-    // Display YouTube video if source is YouTube
-    const recipeVideo = document.getElementById('recipeVideo');
-    if (recipe.source && recipe.source.type === 'youtube' && recipe.source.youtubeUrl) {
-        const videoId = getYouTubeVideoId(recipe.source.youtubeUrl);
-        if (videoId) {
-            recipeVideo.innerHTML = `<iframe src="https://www.youtube.com/embed/${videoId}" allowfullscreen></iframe>`;
-            recipeVideo.classList.remove('hidden');
-        } else {
-            recipeVideo.classList.add('hidden');
-        }
-    } else {
-        recipeVideo.innerHTML = '';
-        recipeVideo.classList.add('hidden');
-    }
-
-    renderIngredients(recipe, recipeId);
-    renderInstructions(recipe, recipeId);
-
-    // Fetch and display rating
-    fetchRatingData(recipeId).then(ratingData => {
-        displayRecipeRating(ratingData.averageRating, ratingData.ratingCount, ratingData.userRating);
-    });
-
-    // Hide landing page and show recipe display
-    landingPage.style.display = 'none';
-    recipeDisplay.classList.remove('hidden');
-
-    renderRecipeList();
-
-    // Close sidebar on mobile when recipe is selected
-    closeSidebar();
-
-    // Track in history
-    addToHistory(recipe);
-
-    // Show "Add to Folder" button for authenticated users
-    if (isAuthenticated) {
-        addToFolderBtn.classList.remove('hidden');
-    } else {
-        addToFolderBtn.classList.add('hidden');
-    }
+    showRecipeById(recipeId, true);
 }
 
 // Render ingredients with checkboxes
@@ -1452,35 +1573,10 @@ function resetRecipe() {
 }
 
 // Return to home page
+// Return to home page
 function goToHome(e) {
     e.preventDefault();
-
-    // Hide recipe display and show landing page
-    recipeDisplay.classList.add('hidden');
-    landingPage.style.display = 'block';
-
-    // Clear current recipe
-    currentRecipeId = null;
-
-    // Clear searches
-    searchQuery = '';
-    searchInput.value = '';
-    searchClearBtn.classList.remove('visible');
-    filteredRecipes = [];
-
-    landingSearch.value = '';
-    landingSearchClearBtn.classList.remove('visible');
-    selectedLandingAutocompleteIndex = -1;
-    landingAutocompleteDropdown.classList.remove('active');
-
-    // Restore random recipes
-    const randomRecipesSection = document.querySelector('.random-recipes-section');
-    const heading = randomRecipesSection.querySelector('h2');
-    heading.textContent = 'Try These Recipes';
-    renderRandomRecipes();
-
-    // Close mobile sidebar if open
-    closeSidebar();
+    navigateTo('/home');
 }
 
 // Setup event listeners

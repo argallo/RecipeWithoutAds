@@ -876,6 +876,11 @@ app.post('/api/history/transfer', requireAuth, (req, res) => {
     );
 });
 
+// Serve index.html for all non-API routes (client-side routing)
+app.get('*', (req, res) => {
+    res.sendFile(__dirname + '/index.html');
+});
+
 // Start server
 app.listen(PORT, () => {
     console.log(`Server running at http://localhost:${PORT}`);
