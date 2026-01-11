@@ -249,6 +249,63 @@
         </div>
     </div>
 
+    <!-- Manage Collaborators Modal -->
+    <div id="collaboratorsModal" class="modal hidden">
+        <div class="modal-content collaborators-modal">
+            <h2 id="collaboratorsModalTitle">Manage Collaborators</h2>
+
+            <div class="collaborators-section">
+                <h3>Owner</h3>
+                <div id="folderOwner" class="collaborator-item">
+                    <!-- Populated dynamically -->
+                </div>
+            </div>
+
+            <div class="collaborators-section">
+                <h3>Collaborators <span id="collaboratorCount">(0/5)</span></h3>
+                <div id="collaboratorsList">
+                    <p class="no-collaborators">No collaborators yet</p>
+                </div>
+            </div>
+
+            <div class="invite-section">
+                <h3>Invite Collaborator</h3>
+                <form id="inviteCollaboratorForm">
+                    <input type="email" id="collaboratorEmail" placeholder="Enter email address" required>
+                    <button type="submit" class="btn-primary">Send Invitation</button>
+                </form>
+                <div class="invite-error" id="inviteError"></div>
+                <div class="invite-success" id="inviteSuccess"></div>
+            </div>
+
+            <div class="modal-buttons">
+                <button type="button" class="btn-secondary" id="closeCollaboratorsBtn">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Pending Invitations Banner -->
+    <div id="invitationsBanner" class="invitations-banner hidden">
+        <div class="banner-content">
+            <span id="invitationsText">You have pending folder invitations</span>
+            <button id="viewInvitationsBtn" class="btn-link">View</button>
+            <button id="dismissBannerBtn" class="btn-close">&times;</button>
+        </div>
+    </div>
+
+    <!-- View Invitations Modal -->
+    <div id="invitationsModal" class="modal hidden">
+        <div class="modal-content invitations-modal">
+            <h2>Pending Invitations</h2>
+            <div id="invitationsList">
+                <!-- Populated dynamically -->
+            </div>
+            <div class="modal-buttons">
+                <button type="button" class="btn-secondary" id="closeInvitationsBtn">Close</button>
+            </div>
+        </div>
+    </div>
+
     <script src="/script.js"></script>
 </body>
 

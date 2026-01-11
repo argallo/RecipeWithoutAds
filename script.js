@@ -202,6 +202,25 @@ const folderNameInput = document.getElementById('folderName');
 const folderError = document.getElementById('folderError');
 const cancelCreateFolderBtn = document.getElementById('cancelCreateFolderBtn');
 
+// Collaboration DOM elements
+const collaboratorsModal = document.getElementById('collaboratorsModal');
+const collaboratorsModalTitle = document.getElementById('collaboratorsModalTitle');
+const folderOwner = document.getElementById('folderOwner');
+const collaboratorsList = document.getElementById('collaboratorsList');
+const collaboratorCount = document.getElementById('collaboratorCount');
+const inviteCollaboratorForm = document.getElementById('inviteCollaboratorForm');
+const collaboratorEmail = document.getElementById('collaboratorEmail');
+const inviteError = document.getElementById('inviteError');
+const inviteSuccess = document.getElementById('inviteSuccess');
+const closeCollaboratorsBtn = document.getElementById('closeCollaboratorsBtn');
+const invitationsBanner = document.getElementById('invitationsBanner');
+const invitationsText = document.getElementById('invitationsText');
+const viewInvitationsBtn = document.getElementById('viewInvitationsBtn');
+const dismissBannerBtn = document.getElementById('dismissBannerBtn');
+const invitationsModal = document.getElementById('invitationsModal');
+const invitationsList = document.getElementById('invitationsList');
+const closeInvitationsBtn = document.getElementById('closeInvitationsBtn');
+
 // Authentication state
 let currentUser = null;
 let isAuthenticated = false;
@@ -210,6 +229,9 @@ let isAuthenticated = false;
 let folders = [];
 let currentFolderId = null;
 let currentFolderName = '';
+
+// Collaboration state
+let currentCollabFolderId = null;
 
 // Guest history (localStorage)
 let localHistory = [];
@@ -689,6 +711,231 @@ async function syncHistoryToBackend() {
         }
     } catch (error) {
         console.error('Error syncing history to backend:', error);
+    }
+}
+
+// ============================================
+// COLLABORATION FUNCTIONS
+// ============================================
+
+// Show collaborators modal
+async function showCollaboratorsModal(folderId, folderName) {
+    currentCollabFolderId = folderId;
+    collaboratorsModalTitle.textContent = `Manage Collaborators - ${folderName}`;
+    inviteError.textContent = '';
+    inviteSuccess.textContent = '';
+    collaboratorEmail.value = '';
+
+    await loadCollaborators(folderId);
+    collaboratorsModal.classList.remove('hidden');
+}
+
+// Load collaborators for a folder
+async function loadCollaborators(folderId) {
+    try {
+        const response = await fetch(`/api/folders/${folderId}/collaborators`);
+        if (response.ok) {
+            const data = await response.json();
+
+            // Display owner
+            folderOwner.innerHTML = `
+                <div class="collaborator-info">
+                    <span class="collaborator-name">${data.owner.username}</span>
+                    <span class="collaborator-email">${data.owner.email}</span>
+                </div>
+                <span class="collaborator-role">Owner</span>
+            `;
+
+            // Display collaborators
+            const collabs = data.collaborators || [];
+            collaboratorCount.textContent = `(${collabs.length}/5)`;
+
+            if (collabs.length === 0) {
+                collaboratorsList.innerHTML = '<p class="no-collaborators">No collaborators yet</p>';
+            } else {
+                collaboratorsList.innerHTML = '';
+                collabs.forEach(collab => {
+                    const collabItem = document.createElement('div');
+                    collabItem.className = 'collaborator-item';
+                    collabItem.innerHTML = `
+                        <div class="collaborator-info">
+                            <span class="collaborator-name">${collab.username}</span>
+                            <span class="collaborator-email">${collab.email}</span>
+                        </div>
+                        <button class="remove-collab-btn" data-user-id="${collab.id}" title="Remove collaborator">&times;</button>
+                    `;
+
+                    // Add remove handler
+                    const removeBtn = collabItem.querySelector('.remove-collab-btn');
+                    removeBtn.addEventListener('click', () => removeCollaborator(folderId, collab.id));
+
+                    collaboratorsList.appendChild(collabItem);
+                });
+            }
+        }
+    } catch (error) {
+        console.error('Error loading collaborators:', error);
+    }
+}
+
+// Invite a collaborator
+async function inviteCollaborator(e) {
+    e.preventDefault();
+    inviteError.textContent = '';
+    inviteSuccess.textContent = '';
+
+    const email = collaboratorEmail.value.trim();
+    if (!email) return;
+
+    try {
+        const response = await fetch(`/api/folders/${currentCollabFolderId}/invite`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ email })
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+            inviteSuccess.textContent = `Invitation sent to ${email}!`;
+            collaboratorEmail.value = '';
+
+            // Show invite URL in console for development
+            if (data.inviteUrl) {
+                console.log('Invitation URL:', data.inviteUrl);
+            }
+        } else {
+            inviteError.textContent = data.error || 'Error sending invitation';
+        }
+    } catch (error) {
+        console.error('Error inviting collaborator:', error);
+        inviteError.textContent = 'Error sending invitation';
+    }
+}
+
+// Remove a collaborator
+async function removeCollaborator(folderId, userId) {
+    if (!confirm('Are you sure you want to remove this collaborator?')) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/folders/${folderId}/collaborators/${userId}`, {
+            method: 'DELETE'
+        });
+
+        if (response.ok) {
+            await loadCollaborators(folderId);
+        } else {
+            const data = await response.json();
+            alert(data.error || 'Error removing collaborator');
+        }
+    } catch (error) {
+        console.error('Error removing collaborator:', error);
+        alert('Error removing collaborator');
+    }
+}
+
+// Check for pending invitations
+async function checkPendingInvitations() {
+    if (!isAuthenticated) return;
+
+    try {
+        const response = await fetch('/api/invitations/pending');
+        if (response.ok) {
+            const data = await response.json();
+            if (data.invitations && data.invitations.length > 0) {
+                const count = data.invitations.length;
+                invitationsText.textContent = `You have ${count} pending folder invitation${count > 1 ? 's' : ''}`;
+                invitationsBanner.classList.remove('hidden');
+            }
+        }
+    } catch (error) {
+        console.error('Error checking invitations:', error);
+    }
+}
+
+// Show invitations modal
+async function showInvitationsModal() {
+    try {
+        const response = await fetch('/api/invitations/pending');
+        if (response.ok) {
+            const data = await response.json();
+
+            if (data.invitations && data.invitations.length > 0) {
+                invitationsList.innerHTML = '';
+                data.invitations.forEach(inv => {
+                    const invItem = document.createElement('div');
+                    invItem.className = 'invitation-item';
+                    invItem.innerHTML = `
+                        <div class="invitation-info">
+                            <strong>${inv.folder_name}</strong>
+                            <span>Invited by ${inv.invited_by}</span>
+                            <span class="invitation-date">${new Date(inv.created_at).toLocaleDateString()}</span>
+                        </div>
+                        <button class="btn-primary accept-invite-btn" data-token="${inv.token}">Accept</button>
+                    `;
+
+                    const acceptBtn = invItem.querySelector('.accept-invite-btn');
+                    acceptBtn.addEventListener('click', () => acceptInvitation(inv.token));
+
+                    invitationsList.appendChild(invItem);
+                });
+            } else {
+                invitationsList.innerHTML = '<p class="no-invitations">No pending invitations</p>';
+            }
+
+            invitationsModal.classList.remove('hidden');
+        }
+    } catch (error) {
+        console.error('Error loading invitations:', error);
+    }
+}
+
+// Accept an invitation
+async function acceptInvitation(token) {
+    try {
+        const response = await fetch(`/api/invitations/${token}/accept`, {
+            method: 'POST'
+        });
+
+        if (response.ok) {
+            const data = await response.json();
+            invitationsModal.classList.add('hidden');
+            invitationsBanner.classList.add('hidden');
+
+            // Reload folders to show the new shared folder
+            await loadFolders();
+
+            alert('Invitation accepted! The folder is now in your sidebar.');
+        } else {
+            const data = await response.json();
+            alert(data.error || 'Error accepting invitation');
+        }
+    } catch (error) {
+        console.error('Error accepting invitation:', error);
+        alert('Error accepting invitation');
+    }
+}
+
+// Handle invitation from URL parameter
+async function handleInvitationFromUrl() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const inviteToken = urlParams.get('invite');
+
+    if (inviteToken) {
+        if (isAuthenticated) {
+            // User is logged in, accept invitation
+            await acceptInvitation(inviteToken);
+            // Remove invite parameter from URL
+            window.history.replaceState({}, '', '/home');
+        } else {
+            // User not logged in, show login modal with message
+            alert('Please log in or sign up to accept this folder invitation');
+            showLoginModal();
+        }
     }
 }
 
@@ -1270,6 +1517,12 @@ async function init() {
     setupRatingEventListeners();
     await checkAuthStatus();
 
+    // Handle invitation from URL
+    await handleInvitationFromUrl();
+
+    // Check for pending invitations
+    await checkPendingInvitations();
+
     // Handle initial route
     const path = window.location.pathname;
     if (path === '/' || path === '') {
@@ -1336,17 +1589,38 @@ function renderFolderList() {
 
         folderHeader.appendChild(folderInfo);
 
-        // Delete button for custom folders
+        // Action buttons for custom folders
         if (folder.is_system === 0) {
-            const deleteBtn = document.createElement('button');
-            deleteBtn.className = 'folder-delete-btn';
-            deleteBtn.innerHTML = '&times;';
-            deleteBtn.title = 'Delete folder';
-            deleteBtn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                deleteFolder(folder.id);
-            });
-            folderHeader.appendChild(deleteBtn);
+            const actionsDiv = document.createElement('div');
+            actionsDiv.className = 'folder-actions';
+
+            // Collaborators button (only for owners)
+            if (folder.is_owner === 1) {
+                const collabBtn = document.createElement('button');
+                collabBtn.className = 'folder-collab-btn';
+                collabBtn.innerHTML = '👥';
+                collabBtn.title = 'Manage collaborators';
+                collabBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    showCollaboratorsModal(folder.id, folder.name);
+                });
+                actionsDiv.appendChild(collabBtn);
+            }
+
+            // Delete button (only for owners)
+            if (folder.is_owner === 1) {
+                const deleteBtn = document.createElement('button');
+                deleteBtn.className = 'folder-delete-btn';
+                deleteBtn.innerHTML = '&times;';
+                deleteBtn.title = 'Delete folder';
+                deleteBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    deleteFolder(folder.id);
+                });
+                actionsDiv.appendChild(deleteBtn);
+            }
+
+            folderHeader.appendChild(actionsDiv);
         }
 
         // Click to show folder
@@ -1810,6 +2084,24 @@ function setupEventListeners() {
         folderError.textContent = '';
     });
 
+    // Collaboration event listeners
+    inviteCollaboratorForm.addEventListener('submit', inviteCollaborator);
+    closeCollaboratorsBtn.addEventListener('click', () => {
+        collaboratorsModal.classList.add('hidden');
+    });
+
+    viewInvitationsBtn.addEventListener('click', () => {
+        showInvitationsModal();
+    });
+
+    dismissBannerBtn.addEventListener('click', () => {
+        invitationsBanner.classList.add('hidden');
+    });
+
+    closeInvitationsBtn.addEventListener('click', () => {
+        invitationsModal.classList.add('hidden');
+    });
+
     // Close modals when clicking outside
     loginModal.addEventListener('click', (e) => {
         if (e.target === loginModal) {
@@ -1838,6 +2130,18 @@ function setupEventListeners() {
             createFolderModal.classList.add('hidden');
             createFolderForm.reset();
             folderError.textContent = '';
+        }
+    });
+
+    collaboratorsModal.addEventListener('click', (e) => {
+        if (e.target === collaboratorsModal) {
+            collaboratorsModal.classList.add('hidden');
+        }
+    });
+
+    invitationsModal.addEventListener('click', (e) => {
+        if (e.target === invitationsModal) {
+            invitationsModal.classList.add('hidden');
         }
     });
 }

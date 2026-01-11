@@ -1,12 +1,47 @@
+require('dotenv').config();
+
 const express = require('express');
 const session = require('express-session');
 const bcrypt = require('bcrypt');
 const sqlite3 = require('sqlite3').verbose();
 const bodyParser = require('body-parser');
 const path = require('path');
+const nodemailer = require('nodemailer');
+const crypto = require('crypto');
 
 const app = express();
 const PORT = 8000;
+
+// Email transporter configuration
+let emailTransporter;
+
+if (process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD) {
+    // Production: Use Gmail
+    emailTransporter = nodemailer.createTransport({
+        service: 'gmail',
+        auth: {
+            user: process.env.GMAIL_USER,
+            pass: process.env.GMAIL_APP_PASSWORD
+        }
+    });
+    console.log('Email configured with Gmail:', process.env.GMAIL_USER);
+} else {
+    // Development: Log to console
+    emailTransporter = {
+        sendMail: async (mailOptions) => {
+            console.log('\n=== EMAIL WOULD BE SENT (No Gmail credentials configured) ===');
+            console.log('To:', mailOptions.to);
+            console.log('Subject:', mailOptions.subject);
+            console.log('HTML:', mailOptions.html);
+            console.log('===========================\n');
+            return { messageId: 'dev-' + Date.now() };
+        }
+    };
+    console.log('⚠️  No Gmail credentials found. Emails will be logged to console.');
+    console.log('   To enable real email sending, configure .env file with:');
+    console.log('   - GMAIL_USER=your-email@gmail.com');
+    console.log('   - GMAIL_APP_PASSWORD=your-app-password');
+}
 
 // Sample recipes to seed into database (user_id = 0 means system/sample recipes)
 const sampleRecipes = [
@@ -229,6 +264,39 @@ function initializeDatabase() {
     `, (err) => {
         if (err) console.error('Error creating folder_recipes table:', err);
         else console.log('Folder_recipes table ready');
+    });
+
+    db.run(`
+        CREATE TABLE IF NOT EXISTS folder_collaborators (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            folder_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            added_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (folder_id) REFERENCES folders(id) ON DELETE CASCADE,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            UNIQUE(folder_id, user_id)
+        )
+    `, (err) => {
+        if (err) console.error('Error creating folder_collaborators table:', err);
+        else console.log('Folder_collaborators table ready');
+    });
+
+    db.run(`
+        CREATE TABLE IF NOT EXISTS invitations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            folder_id INTEGER NOT NULL,
+            email TEXT NOT NULL,
+            token TEXT NOT NULL UNIQUE,
+            invited_by INTEGER NOT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            expires_at DATETIME NOT NULL,
+            accepted INTEGER DEFAULT 0,
+            FOREIGN KEY (folder_id) REFERENCES folders(id) ON DELETE CASCADE,
+            FOREIGN KEY (invited_by) REFERENCES users(id) ON DELETE CASCADE
+        )
+    `, (err) => {
+        if (err) console.error('Error creating invitations table:', err);
+        else console.log('Invitations table ready');
     });
 }
 
@@ -596,14 +664,16 @@ app.get('/api/folders', requireAuth, (req, res) => {
     const userId = req.session.userId;
 
     db.all(
-        `SELECT f.id, f.name, f.is_system, f.created_at,
-                COUNT(fr.recipe_id) as recipe_count
+        `SELECT f.id, f.name, f.is_system, f.created_at, f.user_id,
+                COUNT(fr.recipe_id) as recipe_count,
+                CASE WHEN f.user_id = ? THEN 1 ELSE 0 END as is_owner
          FROM folders f
          LEFT JOIN folder_recipes fr ON f.id = fr.folder_id
-         WHERE f.user_id = ?
+         LEFT JOIN folder_collaborators fc ON f.id = fc.folder_id
+         WHERE f.user_id = ? OR fc.user_id = ?
          GROUP BY f.id
          ORDER BY f.is_system DESC, f.name ASC`,
-        [userId],
+        [userId, userId, userId],
         (err, folders) => {
             if (err) {
                 return res.status(500).json({ error: 'Error fetching folders' });
@@ -696,17 +766,21 @@ app.get('/api/folders/:id/recipes', requireAuth, (req, res) => {
     const userId = req.session.userId;
     const folderId = req.params.id;
 
-    // First check if folder belongs to user
+    // Check if user has access (owner or collaborator)
     db.get(
-        'SELECT name FROM folders WHERE id = ? AND user_id = ?',
-        [folderId, userId],
+        `SELECT f.name
+         FROM folders f
+         LEFT JOIN folder_collaborators fc ON f.id = fc.folder_id
+         WHERE f.id = ? AND (f.user_id = ? OR fc.user_id = ?)
+         LIMIT 1`,
+        [folderId, userId, userId],
         (err, folder) => {
             if (err) {
                 return res.status(500).json({ error: 'Error checking folder' });
             }
 
             if (!folder) {
-                return res.status(404).json({ error: 'Folder not found' });
+                return res.status(404).json({ error: 'Folder not found or access denied' });
             }
 
             // Get recipes in folder with ratings
@@ -756,13 +830,17 @@ app.post('/api/folders/:id/recipes', requireAuth, (req, res) => {
         return res.status(400).json({ error: 'Recipe ID is required' });
     }
 
-    // Check folder ownership
+    // Check if user has access (owner or collaborator)
     db.get(
-        'SELECT id FROM folders WHERE id = ? AND user_id = ?',
-        [folderId, userId],
+        `SELECT f.id
+         FROM folders f
+         LEFT JOIN folder_collaborators fc ON f.id = fc.folder_id
+         WHERE f.id = ? AND (f.user_id = ? OR fc.user_id = ?)
+         LIMIT 1`,
+        [folderId, userId, userId],
         (err, folder) => {
             if (err || !folder) {
-                return res.status(404).json({ error: 'Folder not found' });
+                return res.status(404).json({ error: 'Folder not found or access denied' });
             }
 
             // Check recipe exists
@@ -798,13 +876,17 @@ app.delete('/api/folders/:id/recipes/:recipeId', requireAuth, (req, res) => {
     const folderId = req.params.id;
     const recipeId = req.params.recipeId;
 
-    // Check folder ownership
+    // Check if user has access (owner or collaborator)
     db.get(
-        'SELECT id FROM folders WHERE id = ? AND user_id = ?',
-        [folderId, userId],
+        `SELECT f.id
+         FROM folders f
+         LEFT JOIN folder_collaborators fc ON f.id = fc.folder_id
+         WHERE f.id = ? AND (f.user_id = ? OR fc.user_id = ?)
+         LIMIT 1`,
+        [folderId, userId, userId],
         (err, folder) => {
             if (err || !folder) {
-                return res.status(404).json({ error: 'Folder not found' });
+                return res.status(404).json({ error: 'Folder not found or access denied' });
             }
 
             // Remove from folder
@@ -872,6 +954,303 @@ app.post('/api/history/transfer', requireAuth, (req, res) => {
                     }
                 });
             });
+        }
+    );
+});
+
+// ============================================
+// COLLABORATION API ENDPOINTS
+// ============================================
+
+// Invite a collaborator to a folder
+app.post('/api/folders/:id/invite', requireAuth, (req, res) => {
+    const folderId = parseInt(req.params.id);
+    const userId = req.session.userId;
+    const { email } = req.body;
+
+    if (!email || !email.trim()) {
+        return res.status(400).json({ error: 'Email is required' });
+    }
+
+    const trimmedEmail = email.trim().toLowerCase();
+
+    // Check if folder exists and user is the owner
+    db.get(
+        'SELECT * FROM folders WHERE id = ? AND user_id = ?',
+        [folderId, userId],
+        (err, folder) => {
+            if (err || !folder) {
+                return res.status(404).json({ error: 'Folder not found or you do not have permission' });
+            }
+
+            // Cannot share system folders
+            if (folder.is_system === 1) {
+                return res.status(400).json({ error: 'System folders cannot be shared' });
+            }
+
+            // Check if user is inviting themselves
+            db.get('SELECT id, email FROM users WHERE id = ?', [userId], (err, inviter) => {
+                if (inviter && inviter.email.toLowerCase() === trimmedEmail) {
+                    return res.status(400).json({ error: 'You cannot invite yourself' });
+                }
+
+                // Count existing collaborators
+                db.get(
+                    'SELECT COUNT(*) as count FROM folder_collaborators WHERE folder_id = ?',
+                    [folderId],
+                    (err, result) => {
+                        if (result && result.count >= 5) {
+                            return res.status(400).json({ error: 'Maximum 5 collaborators allowed per folder' });
+                        }
+
+                        // Check if already a collaborator
+                        db.get(
+                            `SELECT fc.id FROM folder_collaborators fc
+                             JOIN users u ON fc.user_id = u.id
+                             WHERE fc.folder_id = ? AND LOWER(u.email) = ?`,
+                            [folderId, trimmedEmail],
+                            (err, existing) => {
+                                if (existing) {
+                                    return res.status(400).json({ error: 'User is already a collaborator' });
+                                }
+
+                                // Check if there's already a pending invitation
+                                db.get(
+                                    'SELECT id FROM invitations WHERE folder_id = ? AND LOWER(email) = ? AND accepted = 0 AND expires_at > datetime("now")',
+                                    [folderId, trimmedEmail],
+                                    (err, pendingInvite) => {
+                                        if (pendingInvite) {
+                                            return res.status(400).json({ error: 'Invitation already sent to this email' });
+                                        }
+
+                                        // Generate invitation token
+                                        const token = crypto.randomBytes(32).toString('hex');
+                                        const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+                                        const expiresAtISO = expiresAt.toISOString(); // SQLite-compatible format
+
+                                        // Create invitation
+                                        db.run(
+                                            'INSERT INTO invitations (folder_id, email, token, invited_by, expires_at) VALUES (?, ?, ?, ?, ?)',
+                                            [folderId, trimmedEmail, token, userId, expiresAtISO],
+                                            function (err) {
+                                                if (err) {
+                                                    return res.status(500).json({ error: 'Error creating invitation' });
+                                                }
+
+                                                // Send invitation email
+                                                const appUrl = process.env.APP_URL || `http://localhost:${PORT}`;
+                                                const inviteUrl = `${appUrl}/home?invite=${token}`;
+                                                const mailOptions = {
+                                                    from: process.env.GMAIL_USER || 'Recipe App <noreply@recipeapp.com>',
+                                                    to: trimmedEmail,
+                                                    subject: `You've been invited to collaborate on "${folder.name}"`,
+                                                    html: `
+                                                        <h2>Folder Collaboration Invitation</h2>
+                                                        <p>You've been invited to collaborate on the folder "${folder.name}".</p>
+                                                        <p>Click the link below to accept the invitation:</p>
+                                                        <p><a href="${inviteUrl}">${inviteUrl}</a></p>
+                                                        <p>This invitation expires in 7 days.</p>
+                                                        <p>If you don't have an account, you'll be able to sign up with this email address.</p>
+                                                    `
+                                                };
+
+                                                emailTransporter.sendMail(mailOptions)
+                                                    .then(() => {
+                                                        res.json({
+                                                            success: true,
+                                                            message: 'Invitation sent successfully',
+                                                            inviteUrl // Return for development/testing
+                                                        });
+                                                    })
+                                                    .catch((error) => {
+                                                        console.error('Email error:', error);
+                                                        res.status(500).json({ error: 'Error sending invitation email' });
+                                                    });
+                                            }
+                                        );
+                                    }
+                                );
+                            }
+                        );
+                    }
+                );
+            });
+        }
+    );
+});
+
+// Get pending invitations for logged-in user
+app.get('/api/invitations/pending', requireAuth, (req, res) => {
+    const userId = req.session.userId;
+
+    db.get('SELECT email FROM users WHERE id = ?', [userId], (err, user) => {
+        if (err || !user) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+
+        db.all(
+            `SELECT i.id, i.token, i.created_at, f.name as folder_name, u.username as invited_by
+             FROM invitations i
+             JOIN folders f ON i.folder_id = f.id
+             JOIN users u ON i.invited_by = u.id
+             WHERE LOWER(i.email) = ? AND i.accepted = 0 AND i.expires_at > datetime("now")
+             ORDER BY i.created_at DESC`,
+            [user.email.toLowerCase()],
+            (err, invitations) => {
+                if (err) {
+                    return res.status(500).json({ error: 'Error fetching invitations' });
+                }
+
+                res.json({ invitations });
+            }
+        );
+    });
+});
+
+// Accept an invitation
+app.post('/api/invitations/:token/accept', requireAuth, (req, res) => {
+    const token = req.params.token;
+    const userId = req.session.userId;
+
+    db.get('SELECT email FROM users WHERE id = ?', [userId], (err, user) => {
+        if (err || !user) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+
+        db.get(
+            'SELECT * FROM invitations WHERE token = ? AND LOWER(email) = ? AND accepted = 0 AND expires_at > datetime("now")',
+            [token, user.email.toLowerCase()],
+            (err, invitation) => {
+                if (err || !invitation) {
+                    // Check if invitation exists but for different email or is expired
+                    db.get('SELECT * FROM invitations WHERE token = ?', [token], (err2, anyInvite) => {
+                        if (!anyInvite) {
+                            return res.status(404).json({ error: 'Invitation not found' });
+                        }
+                        if (anyInvite.accepted === 1) {
+                            return res.status(400).json({ error: 'Invitation already accepted' });
+                        }
+                        if (anyInvite.expires_at <= new Date().toISOString()) {
+                            return res.status(400).json({ error: 'Invitation has expired' });
+                        }
+                        if (anyInvite.email.toLowerCase() !== user.email.toLowerCase()) {
+                            return res.status(400).json({
+                                error: `This invitation was sent to ${anyInvite.email}. You are logged in as ${user.email}. Please log in with the correct account.`
+                            });
+                        }
+                        return res.status(404).json({ error: 'Invitation not found or expired' });
+                    });
+                    return;
+                }
+
+                // Add user as collaborator
+                db.run(
+                    'INSERT INTO folder_collaborators (folder_id, user_id) VALUES (?, ?)',
+                    [invitation.folder_id, userId],
+                    function (err) {
+                        if (err) {
+                            return res.status(500).json({ error: 'Error adding collaborator' });
+                        }
+
+                        // Mark invitation as accepted
+                        db.run(
+                            'UPDATE invitations SET accepted = 1 WHERE id = ?',
+                            [invitation.id],
+                            (err) => {
+                                if (err) {
+                                    return res.status(500).json({ error: 'Error updating invitation' });
+                                }
+
+                                res.json({ success: true, folderId: invitation.folder_id });
+                            }
+                        );
+                    }
+                );
+            }
+        );
+    });
+});
+
+// Get collaborators for a folder
+app.get('/api/folders/:id/collaborators', requireAuth, (req, res) => {
+    const folderId = parseInt(req.params.id);
+    const userId = req.session.userId;
+
+    // Check if user has access to this folder (owner or collaborator)
+    db.get(
+        `SELECT f.id FROM folders f
+         LEFT JOIN folder_collaborators fc ON f.id = fc.folder_id
+         WHERE f.id = ? AND (f.user_id = ? OR fc.user_id = ?)`,
+        [folderId, userId, userId],
+        (err, folder) => {
+            if (err || !folder) {
+                return res.status(404).json({ error: 'Folder not found or access denied' });
+            }
+
+            // Get owner and collaborators
+            db.get(
+                'SELECT u.id, u.username, u.email FROM folders f JOIN users u ON f.user_id = u.id WHERE f.id = ?',
+                [folderId],
+                (err, owner) => {
+                    if (err) {
+                        return res.status(500).json({ error: 'Error fetching owner' });
+                    }
+
+                    db.all(
+                        `SELECT u.id, u.username, u.email, fc.added_at
+                         FROM folder_collaborators fc
+                         JOIN users u ON fc.user_id = u.id
+                         WHERE fc.folder_id = ?
+                         ORDER BY fc.added_at ASC`,
+                        [folderId],
+                        (err, collaborators) => {
+                            if (err) {
+                                return res.status(500).json({ error: 'Error fetching collaborators' });
+                            }
+
+                            res.json({
+                                owner: { ...owner, role: 'owner' },
+                                collaborators: collaborators.map(c => ({ ...c, role: 'collaborator' }))
+                            });
+                        }
+                    );
+                }
+            );
+        }
+    );
+});
+
+// Remove a collaborator
+app.delete('/api/folders/:id/collaborators/:userId', requireAuth, (req, res) => {
+    const folderId = parseInt(req.params.id);
+    const collaboratorId = parseInt(req.params.userId);
+    const userId = req.session.userId;
+
+    // Check if user is the owner
+    db.get(
+        'SELECT * FROM folders WHERE id = ? AND user_id = ?',
+        [folderId, userId],
+        (err, folder) => {
+            if (err || !folder) {
+                return res.status(404).json({ error: 'Folder not found or you do not have permission' });
+            }
+
+            // Remove collaborator
+            db.run(
+                'DELETE FROM folder_collaborators WHERE folder_id = ? AND user_id = ?',
+                [folderId, collaboratorId],
+                function (err) {
+                    if (err) {
+                        return res.status(500).json({ error: 'Error removing collaborator' });
+                    }
+
+                    if (this.changes === 0) {
+                        return res.status(404).json({ error: 'Collaborator not found' });
+                    }
+
+                    res.json({ success: true });
+                }
+            );
         }
     );
 });

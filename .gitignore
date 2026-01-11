@@ -43,5 +43,8 @@ node_modules/
 # Database
 recipes.db
 
+# Environment variables
+.env
+
 # Misc
 .cache
