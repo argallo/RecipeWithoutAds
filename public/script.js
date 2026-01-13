@@ -238,6 +238,121 @@ let localHistory = [];
 const HISTORY_KEY = 'recipe_history';
 const MAX_HISTORY = 20;
 
+// ============================================
+// CLIENT-SIDE CACHE (Stale-While-Revalidate)
+// ============================================
+const CACHE_KEY = 'recipe_cache';
+const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+
+const dataCache = {
+    recipes: null,
+    folders: null,
+    folderRecipes: {}, // keyed by folderId
+    lastFetch: {}
+};
+
+function getCachedData(key) {
+    try {
+        const cached = localStorage.getItem(CACHE_KEY);
+        if (!cached) return null;
+        const data = JSON.parse(cached);
+        return data[key] || null;
+    } catch (e) {
+        return null;
+    }
+}
+
+function setCachedData(key, value) {
+    try {
+        const cached = localStorage.getItem(CACHE_KEY) || '{}';
+        const data = JSON.parse(cached);
+        data[key] = { value, timestamp: Date.now() };
+        localStorage.setItem(CACHE_KEY, JSON.stringify(data));
+    } catch (e) {
+        console.error('Cache write error:', e);
+    }
+}
+
+function isCacheValid(key) {
+    const cached = getCachedData(key);
+    if (!cached) return false;
+    return (Date.now() - cached.timestamp) < CACHE_DURATION;
+}
+
+function clearCache() {
+    localStorage.removeItem(CACHE_KEY);
+    dataCache.recipes = null;
+    dataCache.folders = null;
+    dataCache.folderRecipes = {};
+}
+
+function invalidateFolderCache(folderId) {
+    try {
+        const cached = localStorage.getItem(CACHE_KEY);
+        if (!cached) return;
+        const data = JSON.parse(cached);
+        delete data[`folder_${folderId}`];
+        localStorage.setItem(CACHE_KEY, JSON.stringify(data));
+    } catch (e) {
+        console.error('Cache invalidation error:', e);
+    }
+}
+
+// ============================================
+// LOADING STATES
+// ============================================
+let isLoadingFolders = false;
+let isLoadingRecipes = false;
+
+function showFolderSkeletons() {
+    recipeList.innerHTML = `
+        <div class="skeleton-loader">
+            <div class="skeleton skeleton-btn"></div>
+            <div class="skeleton skeleton-folder"></div>
+            <div class="skeleton skeleton-folder"></div>
+            <div class="skeleton skeleton-folder"></div>
+        </div>
+    `;
+}
+
+function showRecipeSkeletons() {
+    randomRecipesGrid.innerHTML = `
+        <div class="recipe-card skeleton-card">
+            <div class="skeleton skeleton-image"></div>
+            <div class="skeleton-content">
+                <div class="skeleton skeleton-title"></div>
+                <div class="skeleton skeleton-text"></div>
+            </div>
+        </div>
+        <div class="recipe-card skeleton-card">
+            <div class="skeleton skeleton-image"></div>
+            <div class="skeleton-content">
+                <div class="skeleton skeleton-title"></div>
+                <div class="skeleton skeleton-text"></div>
+            </div>
+        </div>
+        <div class="recipe-card skeleton-card">
+            <div class="skeleton skeleton-image"></div>
+            <div class="skeleton-content">
+                <div class="skeleton skeleton-title"></div>
+                <div class="skeleton skeleton-text"></div>
+            </div>
+        </div>
+    `;
+}
+
+// API fetch helper - ensures credentials are included for session cookies
+async function apiFetch(url, options = {}) {
+    const defaultOptions = {
+        credentials: 'include', // Required for session cookies
+        headers: {
+            'Content-Type': 'application/json',
+            ...options.headers
+        }
+    };
+    return fetch(url, { ...defaultOptions, ...options });
+}
+
 // localStorage history helper functions
 function getLocalHistory() {
     try {
@@ -513,51 +628,148 @@ function closeSidebar() {
 // Folder Management Functions
 
 async function loadFolders() {
+    const cachedFolders = getCachedData('folders');
+    const cachedRecipes = getCachedData('recipes');
+    const foldersValid = isCacheValid('folders');
+    const recipesValid = isCacheValid('recipes');
+
+    // If all cache is valid, use it and don't fetch
+    if (cachedFolders?.value && cachedRecipes?.value && foldersValid && recipesValid) {
+        folders = cachedFolders.value;
+        allRecipes = cachedRecipes.value;
+
+        const historyFolder = folders.find(f => f.name === 'History' && f.is_system);
+        if (historyFolder) {
+            // This will use cache and not fetch since cache is valid
+            await showFolder(historyFolder.id, 'History');
+        } else {
+            renderRecipeList();
+        }
+        renderRandomRecipes();
+        return;
+    }
+
+    // Show loading state only if no cached data
+    if (isAuthenticated && !cachedFolders?.value) {
+        showFolderSkeletons();
+        showRecipeSkeletons();
+    }
+
+    // Show stale cached data while fetching (if available)
+    if (cachedFolders?.value && cachedRecipes?.value) {
+        folders = cachedFolders.value;
+        allRecipes = cachedRecipes.value;
+
+        const historyFolder = folders.find(f => f.name === 'History' && f.is_system);
+        if (historyFolder) {
+            const cachedHistoryRecipes = getCachedData(`folder_${historyFolder.id}`);
+            if (cachedHistoryRecipes?.value) {
+                recipes = cachedHistoryRecipes.value;
+                currentFolderId = historyFolder.id;
+                currentFolderName = 'History';
+                renderRecipeList();
+                renderRandomRecipes();
+            }
+        }
+    }
+
+    // Fetch fresh data
     try {
-        // Load all recipes for home page search
-        const recipesResponse = await fetch('/api/recipes');
+        const [recipesResponse, foldersResponse] = await Promise.all([
+            apiFetch('/api/recipes'),
+            apiFetch('/api/folders')
+        ]);
+
         if (recipesResponse.ok) {
             const recipesData = await recipesResponse.json();
             allRecipes = recipesData.recipes;
+            setCachedData('recipes', allRecipes);
         }
 
-        const response = await fetch('/api/folders');
-        if (response.ok) {
-            const data = await response.json();
+        if (foldersResponse.ok) {
+            const data = await foldersResponse.json();
             folders = data.folders;
+            setCachedData('folders', folders);
 
             // Find History folder and load its recipes
-            const historyFolder = folders.find(f => f.name === 'History' && f.is_system === 1);
+            const historyFolder = folders.find(f => f.name === 'History' && f.is_system);
             if (historyFolder) {
-                await showFolder(historyFolder.id, 'History');
+                await showFolder(historyFolder.id, 'History', true);
             } else {
                 renderRecipeList();
+                renderRandomRecipes();
             }
         }
     } catch (error) {
         console.error('Error loading folders:', error);
+        // If we have cached data, keep showing it
+        if (!cachedFolders?.value) {
+            renderRecipeList();
+        }
     }
 }
 
-async function showFolder(folderId, folderName) {
+async function showFolder(folderId, folderName, forceRefresh = false) {
+    const cacheKey = `folder_${folderId}`;
+    const cachedFolderRecipes = getCachedData(cacheKey);
+    const cacheIsValid = isCacheValid(cacheKey);
+
+    // If clicking on the same folder and cache is valid, just re-render (no fetch)
+    if (currentFolderId === folderId && cacheIsValid && !forceRefresh) {
+        renderRecipeList();
+        return;
+    }
+
     currentFolderId = folderId;
     currentFolderName = folderName;
 
-    try {
-        const response = await fetch(`/api/folders/${folderId}/recipes`);
+    // Show cached data immediately if available
+    if (cachedFolderRecipes?.value) {
+        recipes = cachedFolderRecipes.value;
+        renderRecipeList();
+
+        // If cache is still valid, don't fetch
+        if (cacheIsValid && !forceRefresh) {
+            return;
+        }
+    }
+
+    // Fetch fresh data (only if cache is stale/missing or force refresh)
+    const fetchPromise = apiFetch(`/api/folders/${folderId}/recipes`).then(async response => {
         if (response.ok) {
             const data = await response.json();
             recipes = data.recipes;
-            renderRecipeList();
+            setCachedData(cacheKey, recipes);
+
+            // Only re-render if we're still on this folder
+            if (currentFolderId === folderId) {
+                renderRecipeList();
+            }
         }
-    } catch (error) {
+    }).catch(error => {
         console.error('Error loading folder recipes:', error);
+    });
+
+    // If no cache, wait for the fetch
+    if (!cachedFolderRecipes?.value) {
+        await fetchPromise;
     }
 }
 
 async function createFolder(name) {
+    // Optimistic UI: Add folder immediately with temp ID
+    const tempFolder = {
+        id: `temp_${Date.now()}`,
+        name: name,
+        is_system: false,
+        recipe_count: 0,
+        is_owner: 1
+    };
+    folders.push(tempFolder);
+    renderRecipeList();
+
     try {
-        const response = await fetch('/api/folders', {
+        const response = await apiFetch('/api/folders', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -568,14 +780,25 @@ async function createFolder(name) {
         const data = await response.json();
 
         if (response.ok) {
-            folders.push(data.folder);
+            // Replace temp folder with real one
+            const tempIndex = folders.findIndex(f => f.id === tempFolder.id);
+            if (tempIndex !== -1) {
+                folders[tempIndex] = { ...data.folder, recipe_count: 0, is_owner: 1 };
+            }
+            setCachedData('folders', folders);
             renderRecipeList();
             return true;
         } else {
+            // Rollback on failure
+            folders = folders.filter(f => f.id !== tempFolder.id);
+            renderRecipeList();
             alert(data.error || 'Error creating folder');
             return false;
         }
     } catch (error) {
+        // Rollback on error
+        folders = folders.filter(f => f.id !== tempFolder.id);
+        renderRecipeList();
         console.error('Error creating folder:', error);
         alert('Error creating folder');
         return false;
@@ -588,7 +811,7 @@ async function deleteFolder(folderId) {
     }
 
     try {
-        const response = await fetch(`/api/folders/${folderId}`, {
+        const response = await apiFetch(`/api/folders/${folderId}`, {
             method: 'DELETE'
         });
 
@@ -621,16 +844,14 @@ async function handleAddToFolder(folderId) {
     if (!currentRecipeId) return;
 
     try {
-        const response = await fetch(`/api/folders/${folderId}/recipes`, {
+        const response = await apiFetch(`/api/folders/${folderId}/recipes`, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ recipeId: currentRecipeId })
+            body: JSON.stringify({ recipeId: String(currentRecipeId) })
         });
 
         if (response.ok) {
-            // Success
+            // Invalidate cache for this folder
+            invalidateFolderCache(folderId);
             return true;
         } else {
             const data = await response.json();
@@ -645,14 +866,17 @@ async function handleAddToFolder(folderId) {
 
 async function removeFromFolder(folderId, recipeId) {
     try {
-        const response = await fetch(`/api/folders/${folderId}/recipes/${recipeId}`, {
+        const response = await apiFetch(`/api/folders/${folderId}/recipes/${recipeId}`, {
             method: 'DELETE'
         });
 
         if (response.ok) {
+            // Invalidate cache for this folder
+            invalidateFolderCache(folderId);
+
             // If currently viewing this folder, refresh
             if (currentFolderId === folderId) {
-                showFolder(folderId, currentFolderName);
+                showFolder(folderId, currentFolderName, true);
             }
             return true;
         } else {
@@ -671,7 +895,7 @@ async function addToHistory(recipe) {
     }
 
     // Find History folder
-    const historyFolder = folders.find(f => f.name === 'History' && f.is_system === 1);
+    const historyFolder = folders.find(f => f.name === 'History' && f.is_system);
     if (!historyFolder) {
         console.error('History folder not found');
         return;
@@ -679,12 +903,9 @@ async function addToHistory(recipe) {
 
     // Silently add to history folder
     try {
-        await fetch(`/api/folders/${historyFolder.id}/recipes`, {
+        await apiFetch(`/api/folders/${historyFolder.id}/recipes`, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ recipeId: recipe.id })
+            body: JSON.stringify({ recipeId: String(recipe.id) })
         });
     } catch (error) {
         console.error('Error adding to history:', error);
@@ -698,12 +919,15 @@ async function syncHistoryToBackend() {
     }
 
     try {
-        const response = await fetch('/api/history/transfer', {
+        // Ensure all IDs are strings
+        const stringIds = history.map(id => String(id)).filter(id => id && id !== 'undefined');
+        if (stringIds.length === 0) {
+            return;
+        }
+
+        const response = await apiFetch('/api/history/transfer', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ recipeIds: history })
+            body: JSON.stringify({ recipeIds: stringIds })
         });
 
         if (response.ok) {
@@ -733,7 +957,7 @@ async function showCollaboratorsModal(folderId, folderName) {
 // Load collaborators for a folder
 async function loadCollaborators(folderId) {
     try {
-        const response = await fetch(`/api/folders/${folderId}/collaborators`);
+        const response = await apiFetch(`/api/folders/${folderId}/collaborators`);
         if (response.ok) {
             const data = await response.json();
 
@@ -788,7 +1012,7 @@ async function inviteCollaborator(e) {
     if (!email) return;
 
     try {
-        const response = await fetch(`/api/folders/${currentCollabFolderId}/invite`, {
+        const response = await apiFetch(`/api/folders/${currentCollabFolderId}/invite`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -822,7 +1046,7 @@ async function removeCollaborator(folderId, userId) {
     }
 
     try {
-        const response = await fetch(`/api/folders/${folderId}/collaborators/${userId}`, {
+        const response = await apiFetch(`/api/folders/${folderId}/collaborators/${userId}`, {
             method: 'DELETE'
         });
 
@@ -843,7 +1067,7 @@ async function checkPendingInvitations() {
     if (!isAuthenticated) return;
 
     try {
-        const response = await fetch('/api/invitations/pending');
+        const response = await apiFetch('/api/invitations/pending');
         if (response.ok) {
             const data = await response.json();
             if (data.invitations && data.invitations.length > 0) {
@@ -860,7 +1084,7 @@ async function checkPendingInvitations() {
 // Show invitations modal
 async function showInvitationsModal() {
     try {
-        const response = await fetch('/api/invitations/pending');
+        const response = await apiFetch('/api/invitations/pending');
         if (response.ok) {
             const data = await response.json();
 
@@ -897,7 +1121,7 @@ async function showInvitationsModal() {
 // Accept an invitation
 async function acceptInvitation(token) {
     try {
-        const response = await fetch(`/api/invitations/${token}/accept`, {
+        const response = await apiFetch(`/api/invitations/${token}/accept`, {
             method: 'POST'
         });
 
@@ -1328,7 +1552,7 @@ function renderLandingAutocomplete(suggestions) {
 // Authentication functions
 async function checkAuthStatus() {
     try {
-        const response = await fetch('/api/user');
+        const response = await apiFetch('/api/user');
         if (response.ok) {
             const data = await response.json();
             currentUser = data.user;
@@ -1366,7 +1590,7 @@ async function handleLogin(e) {
     const password = document.getElementById('loginPassword').value;
 
     try {
-        const response = await fetch('/api/login', {
+        const response = await apiFetch('/api/login', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -1402,7 +1626,7 @@ async function handleSignup(e) {
     const password = document.getElementById('signupPassword').value;
 
     try {
-        const response = await fetch('/api/signup', {
+        const response = await apiFetch('/api/signup', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -1431,7 +1655,7 @@ async function handleSignup(e) {
 
 async function handleLogout() {
     try {
-        const response = await fetch('/api/logout', {
+        const response = await apiFetch('/api/logout', {
             method: 'POST'
         });
 
@@ -1439,6 +1663,7 @@ async function handleLogout() {
             currentUser = null;
             isAuthenticated = false;
             recipes = [];
+            allRecipes = [];
             currentRecipeId = null;
             searchQuery = '';
             searchInput.value = '';
@@ -1446,6 +1671,10 @@ async function handleLogout() {
             folders = [];
             currentFolderId = null;
             currentFolderName = '';
+
+            // Clear cache on logout
+            clearCache();
+
             updateAuthUI();
             renderRecipeList();
             renderRandomRecipes();
@@ -1470,7 +1699,7 @@ async function loadRecipes() {
     }
 
     try {
-        const response = await fetch('/api/recipes');
+        const response = await apiFetch('/api/recipes');
         if (response.ok) {
             const data = await response.json();
             recipes = data.recipes;
@@ -1590,7 +1819,7 @@ function renderFolderList() {
         folderHeader.appendChild(folderInfo);
 
         // Action buttons for custom folders
-        if (folder.is_system === 0) {
+        if (!folder.is_system) {
             const actionsDiv = document.createElement('div');
             actionsDiv.className = 'folder-actions';
 
@@ -1918,22 +2147,17 @@ async function showAddToFolderModal() {
 }
 
 async function getRecipeFolders(recipeId) {
-    // Return array of folder IDs that contain this recipe
-    const recipeFolderIds = [];
-    for (const folder of folders) {
-        try {
-            const response = await fetch(`/api/folders/${folder.id}/recipes`);
-            if (response.ok) {
-                const data = await response.json();
-                if (data.recipes.some(r => r.id === recipeId)) {
-                    recipeFolderIds.push(folder.id);
-                }
-            }
-        } catch (error) {
-            console.error('Error checking folder:', error);
+    // Return array of folder IDs that contain this recipe (single API call)
+    try {
+        const response = await apiFetch(`/api/recipes/${recipeId}/folders`);
+        if (response.ok) {
+            const data = await response.json();
+            return data.folderIds || [];
         }
+    } catch (error) {
+        console.error('Error checking recipe folders:', error);
     }
-    return recipeFolderIds;
+    return [];
 }
 
 async function handleSaveFolders() {
@@ -1941,7 +2165,7 @@ async function handleSaveFolders() {
     let changes = [];
 
     for (const checkbox of checkboxes) {
-        const folderId = parseInt(checkbox.value);
+        const folderId = checkbox.value; // Keep as string - Firestore IDs are strings
         const isChecked = checkbox.checked;
         const wasChecked = checkbox.dataset.initiallyChecked === 'true';
 
@@ -2198,7 +2422,7 @@ async function addNewRecipe() {
     };
 
     try {
-        const response = await fetch('/api/recipes', {
+        const response = await apiFetch('/api/recipes', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -2281,7 +2505,7 @@ function createCardRatingHTML(averageRating, ratingCount) {
 // Fetch rating data for a recipe
 async function fetchRatingData(recipeId) {
     try {
-        const response = await fetch(`/api/recipes/${recipeId}/rating`);
+        const response = await apiFetch(`/api/recipes/${recipeId}/rating`);
         if (response.ok) {
             const data = await response.json();
             userRatings[recipeId] = data.hasRated;
@@ -2336,7 +2560,7 @@ async function submitRating() {
     if (!currentRatingRecipeId || selectedRating === 0) return;
 
     try {
-        const response = await fetch(`/api/recipes/${currentRatingRecipeId}/rating`, {
+        const response = await apiFetch(`/api/recipes/${currentRatingRecipeId}/rating`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'

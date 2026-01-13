@@ -20,6 +20,26 @@
   "functions": {
     "source": "functions",
     "predeploy": [],
-    "runtime": "nodejs18"
+    "runtime": "nodejs20"
+  },
+  "firestore": {
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
+  },
+  "emulators": {
+    "functions": {
+      "port": 5001
+    },
+    "firestore": {
+      "port": 8081
+    },
+    "hosting": {
+      "port": 3000
+    },
+    "ui": {
+      "enabled": true,
+      "port": 4000
+    },
+    "singleProjectMode": true
   }
 }

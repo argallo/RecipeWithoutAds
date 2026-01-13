@@ -1,0 +1,137 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper function to check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Helper function to check if user owns a document
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Users collection
+    match /users/{userId} {
+      // Allow users to read their own data
+      allow read: if isAuthenticated() && request.auth.uid == userId;
+
+      // Allow users to create their own account (signup)
+      allow create: if request.auth.uid == userId;
+
+      // Allow users to update their own data (but not password directly)
+      allow update: if isAuthenticated() && request.auth.uid == userId;
+
+      // No delete allowed
+      allow delete: if false;
+    }
+
+    // Recipes collection
+    match /recipes/{recipeId} {
+      // Anyone can read recipes (for guest users and logged-in users)
+      allow read: if true;
+
+      // Only authenticated users can create recipes
+      allow create: if isAuthenticated();
+
+      // Only recipe owner can update/delete their recipes
+      // System recipes (user_id = 'system') cannot be modified
+      allow update, delete: if isAuthenticated()
+        && resource.data.user_id == request.auth.uid
+        && resource.data.user_id != 'system';
+    }
+
+    // Ratings collection
+    match /ratings/{ratingId} {
+      // Anyone can read ratings
+      allow read: if true;
+
+      // Only authenticated users can create/update ratings
+      // Users can only modify their own ratings
+      allow create: if isAuthenticated()
+        && request.resource.data.user_id == request.auth.uid;
+
+      allow update: if isAuthenticated()
+        && resource.data.user_id == request.auth.uid;
+
+      // Users can delete their own ratings
+      allow delete: if isAuthenticated()
+        && resource.data.user_id == request.auth.uid;
+    }
+
+    // Folders collection
+    match /folders/{folderId} {
+      // Users can read their own folders
+      allow read: if isAuthenticated() && (
+        resource.data.user_id == request.auth.uid
+        || exists(/databases/$(database)/documents/folder_collaborators/$(request.auth.uid + '_' + folderId))
+      );
+
+      // Users can create folders
+      allow create: if isAuthenticated()
+        && request.resource.data.user_id == request.auth.uid;
+
+      // Users can update their own folders (but not system folders)
+      allow update: if isAuthenticated()
+        && resource.data.user_id == request.auth.uid
+        && resource.data.is_system != true;
+
+      // Users can delete their own folders (but not system folders)
+      allow delete: if isAuthenticated()
+        && resource.data.user_id == request.auth.uid
+        && resource.data.is_system != true;
+    }
+
+    // Folder recipes collection
+    match /folder_recipes/{linkId} {
+      // Function to check if user has access to a folder (owner or collaborator)
+      function hasAccessToFolder(folderId) {
+        let folder = get(/databases/$(database)/documents/folders/$(folderId));
+        let isOwner = folder.data.user_id == request.auth.uid;
+        let collaboratorExists = exists(/databases/$(database)/documents/folder_collaborators/$(request.auth.uid + '_' + folderId));
+        return isOwner || collaboratorExists;
+      }
+
+      // Users can read folder_recipes if they have access to the folder
+      allow read: if isAuthenticated()
+        && hasAccessToFolder(resource.data.folder_id);
+
+      // Users can add recipes to folders they have access to
+      allow create: if isAuthenticated()
+        && hasAccessToFolder(request.resource.data.folder_id);
+
+      // Users can remove recipes from folders they have access to
+      allow delete: if isAuthenticated()
+        && hasAccessToFolder(resource.data.folder_id);
+    }
+
+    // Folder collaborators collection
+    match /folder_collaborators/{collaboratorId} {
+      // Users can read collaborators for folders they own or collaborate on
+      allow read: if isAuthenticated();
+
+      // Only folder owners can add collaborators (handled by backend)
+      allow create: if isAuthenticated();
+
+      // Only folder owners can remove collaborators (handled by backend)
+      allow delete: if isAuthenticated();
+    }
+
+    // Invitations collection
+    match /invitations/{invitationId} {
+      // Users can read invitations sent to their email
+      allow read: if isAuthenticated();
+
+      // Only folder owners can create invitations (handled by backend)
+      allow create: if isAuthenticated();
+
+      // Users can update invitations sent to their email (for accepting)
+      allow update: if isAuthenticated();
+
+      // Only invitation sender can delete
+      allow delete: if isAuthenticated()
+        && resource.data.invited_by == request.auth.uid;
+    }
+  }
+}
