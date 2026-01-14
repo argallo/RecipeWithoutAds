@@ -3,8 +3,6 @@ require('dotenv').config();
 const functions = require('firebase-functions');
 const admin = require('firebase-admin');
 const express = require('express');
-const session = require('express-session');
-const bcrypt = require('bcrypt');
 const bodyParser = require('body-parser');
 const nodemailer = require('nodemailer');
 const crypto = require('crypto');
@@ -26,113 +24,6 @@ app.set('trust proxy', 1);
 // Middleware
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
-
-// ============================================
-// CUSTOM FIRESTORE SESSION STORE
-// ============================================
-const Store = session.Store;
-
-class FirestoreSessionStore extends Store {
-    constructor(options = {}) {
-        super(options);
-        this.collection = db.collection(options.collection || 'sessions');
-        this.ttl = options.ttl || 86400000; // 24 hours default
-    }
-
-    async get(sid, callback) {
-        try {
-            const doc = await this.collection.doc(sid).get();
-            if (!doc.exists) {
-                return callback(null, null);
-            }
-            const data = doc.data();
-            // Check if session expired
-            const expiresDate = data.expires?.toDate ? data.expires.toDate() : new Date(data.expires);
-            if (expiresDate < new Date()) {
-                await this.destroy(sid, () => {});
-                return callback(null, null);
-            }
-            callback(null, data.session);
-        } catch (error) {
-            callback(error);
-        }
-    }
-
-    async set(sid, session, callback) {
-        try {
-            const expires = session.cookie && session.cookie.maxAge
-                ? new Date(Date.now() + session.cookie.maxAge)
-                : new Date(Date.now() + this.ttl);
-
-            // Convert session to plain object (Firestore can't serialize custom prototypes)
-            const plainSession = JSON.parse(JSON.stringify(session));
-
-            await this.collection.doc(sid).set({
-                session: plainSession,
-                expires: expires.toISOString(),
-                updatedAt: new Date().toISOString()
-            });
-            callback(null);
-        } catch (error) {
-            callback(error);
-        }
-    }
-
-    async destroy(sid, callback) {
-        try {
-            await this.collection.doc(sid).delete();
-            callback(null);
-        } catch (error) {
-            callback(error);
-        }
-    }
-
-    async touch(sid, session, callback) {
-        try {
-            const expires = session.cookie && session.cookie.maxAge
-                ? new Date(Date.now() + session.cookie.maxAge)
-                : new Date(Date.now() + this.ttl);
-
-            // Convert session to plain object (Firestore can't serialize custom prototypes)
-            const plainSession = JSON.parse(JSON.stringify(session));
-
-            // Use set with merge to avoid errors if doc doesn't exist
-            await this.collection.doc(sid).set({
-                session: plainSession,
-                expires: expires.toISOString(),
-                updatedAt: new Date().toISOString()
-            }, { merge: true });
-            callback(null);
-        } catch (error) {
-            callback(error);
-        }
-    }
-}
-
-// Detect if running in emulator
-const isEmulator = process.env.FUNCTIONS_EMULATOR === 'true' || process.env.FIRESTORE_EMULATOR_HOST;
-
-// Session configuration with custom Firestore store for persistence
-// IMPORTANT: Firebase Hosting only allows cookies named "__session" to pass through
-app.use(session({
-    store: new FirestoreSessionStore({
-        collection: 'sessions',
-        ttl: 7 * 24 * 60 * 60 * 1000 // 7 days
-    }),
-    secret: process.env.SESSION_SECRET || 'your-secret-key-change-in-production',
-    resave: false, // Only save if session was modified
-    saveUninitialized: false,
-    rolling: false, // Don't reset cookie on every response (reduces writes)
-    proxy: true,   // Trust the reverse proxy (Firebase Hosting)
-    cookie: {
-        secure: !isEmulator, // true in production (HTTPS), false locally
-        httpOnly: true,
-        sameSite: 'lax',
-        maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-        path: '/'
-    },
-    name: '__session' // Firebase Hosting only passes through this cookie name
-}));
 
 // Email transporter configuration
 let emailTransporter;
@@ -168,11 +59,26 @@ if (process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD) {
 // MIDDLEWARE
 // ============================================
 
-function requireAuth(req, res, next) {
-    if (!req.session.userId) {
-        return res.status(401).json({ error: 'Unauthorized' });
+// Verify Firebase ID token and attach user info to request
+async function requireAuth(req, res, next) {
+    const authHeader = req.headers.authorization;
+
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return res.status(401).json({ error: 'Unauthorized - No token provided' });
     }
-    next();
+
+    const idToken = authHeader.split('Bearer ')[1];
+
+    try {
+        // Verify the ID token
+        const decodedToken = await admin.auth().verifyIdToken(idToken);
+        req.user = decodedToken;
+        req.userId = decodedToken.uid;
+        next();
+    } catch (error) {
+        console.error('Error verifying ID token:', error);
+        return res.status(401).json({ error: 'Unauthorized - Invalid token' });
+    }
 }
 
 // ============================================
@@ -346,74 +252,55 @@ app.use(async (req, res, next) => {
 });
 
 // ============================================
-// AUTHENTICATION ROUTES
+// AUTHENTICATION ROUTES (Firebase Auth)
 // ============================================
 
-app.post('/api/signup', async (req, res) => {
+// Create user document in Firestore (called after Firebase Auth signup)
+app.post('/api/user/create', requireAuth, async (req, res) => {
     try {
-        const { username, email, password } = req.body;
+        const { email, username } = req.body;
+        const userId = req.userId; // Firebase Auth UID
 
-        if (!username || !email || !password) {
-            return res.status(400).json({ error: 'All fields are required' });
+        // Check if user document already exists
+        const userDoc = await db.collection('users').doc(userId).get();
+        if (userDoc.exists) {
+            const userData = userDoc.data();
+            return res.json({
+                success: true,
+                user: { id: userId, username: userData.username, email: userData.email }
+            });
         }
 
-        if (password.length < 6) {
-            return res.status(400).json({ error: 'Password must be at least 6 characters' });
+        // Validate username
+        if (!username || username.trim().length === 0) {
+            return res.status(400).json({ error: 'Username is required' });
         }
 
-        // Check if user exists
-        const usersRef = db.collection('users');
-        const emailQuery = await usersRef.where('email', '==', email.toLowerCase()).get();
+        const trimmedUsername = username.trim();
 
-        if (!emailQuery.empty) {
-            return res.status(400).json({ error: 'Email already registered' });
-        }
-
-        const usernameQuery = await usersRef.where('username', '==', username).get();
+        // Check if username is taken by another user
+        const usernameQuery = await db.collection('users').where('username', '==', trimmedUsername).get();
         if (!usernameQuery.empty) {
             return res.status(400).json({ error: 'Username already taken' });
         }
 
-        // Hash password
-        const hashedPassword = await bcrypt.hash(password, 10);
-
-        // Create user
-        const userRef = await usersRef.add({
-            username,
+        // Create user document with the exact username provided
+        await db.collection('users').doc(userId).set({
+            username: trimmedUsername,
             email: email.toLowerCase(),
-            password: hashedPassword,
-            created_at: null
+            created_at: admin.firestore.FieldValue.serverTimestamp()
         });
-
-        const userId = userRef.id;
 
         // Create default folders
-        const foldersRef = db.collection('folders');
-        await foldersRef.add({
-            user_id: userId,
-            name: 'Favorites',
-            is_system: true,
-            created_at: null
-        });
-
-        await foldersRef.add({
-            user_id: userId,
-            name: 'History',
-            is_system: true,
-            created_at: null
-        });
-
-        // Set session
-        req.session.userId = userId;
-        req.session.username = username;
+        await ensureDefaultFolders(userId);
 
         res.json({
             success: true,
-            user: { id: userId, username, email: email.toLowerCase() }
+            user: { id: userId, username: trimmedUsername, email: email.toLowerCase() }
         });
     } catch (error) {
-        console.error('Signup error:', error);
-        res.status(500).json({ error: 'Error creating account' });
+        console.error('User creation error:', error);
+        res.status(500).json({ error: 'Error creating user' });
     }
 });
 
@@ -450,83 +337,47 @@ async function ensureDefaultFolders(userId) {
     }
 }
 
-app.post('/api/login', async (req, res) => {
+// Repair endpoint to fix accounts created during migration
+app.post('/api/user/repair', requireAuth, async (req, res) => {
     try {
-        const { email, password } = req.body;
+        const userId = req.userId;
+        const firebaseUser = await admin.auth().getUser(userId);
 
-        if (!email || !password) {
-            return res.status(400).json({ error: 'Email and password required' });
-        }
+        // Get the display name from Firebase Auth
+        const correctUsername = firebaseUser.displayName || firebaseUser.email.split('@')[0];
 
-        // Find user
-        const usersRef = db.collection('users');
-        const snapshot = await usersRef.where('email', '==', email.toLowerCase()).get();
+        // Update the Firestore user document with correct username
+        const userDoc = await db.collection('users').doc(userId).get();
 
-        if (snapshot.empty) {
-            // Also try username
-            const usernameSnapshot = await usersRef.where('username', '==', email).get();
-            if (usernameSnapshot.empty) {
-                return res.status(401).json({ error: 'Invalid credentials' });
-            }
-
-            const user = usernameSnapshot.docs[0];
-            const userData = user.data();
-            const validPassword = await bcrypt.compare(password, userData.password);
-
-            if (!validPassword) {
-                return res.status(401).json({ error: 'Invalid credentials' });
-            }
-
-            req.session.userId = user.id;
-            req.session.username = userData.username;
-
-            // Ensure default folders exist
-            await ensureDefaultFolders(user.id);
-
-            return res.json({
-                success: true,
-                user: { id: user.id, username: userData.username, email: userData.email }
+        if (userDoc.exists) {
+            await db.collection('users').doc(userId).update({
+                username: correctUsername
+            });
+        } else {
+            // Create user doc if it doesn't exist
+            await db.collection('users').doc(userId).set({
+                username: correctUsername,
+                email: firebaseUser.email.toLowerCase(),
+                created_at: admin.firestore.FieldValue.serverTimestamp()
             });
         }
 
-        const user = snapshot.docs[0];
-        const userData = user.data();
-
-        // Verify password
-        const validPassword = await bcrypt.compare(password, userData.password);
-        if (!validPassword) {
-            return res.status(401).json({ error: 'Invalid credentials' });
-        }
-
-        // Set session
-        req.session.userId = user.id;
-        req.session.username = userData.username;
-
-        // Ensure default folders exist
-        await ensureDefaultFolders(user.id);
+        // Ensure folders exist
+        await ensureDefaultFolders(userId);
 
         res.json({
             success: true,
-            user: { id: user.id, username: userData.username, email: userData.email }
+            user: { id: userId, username: correctUsername, email: firebaseUser.email }
         });
     } catch (error) {
-        console.error('Login error:', error);
-        res.status(500).json({ error: 'Error logging in' });
+        console.error('Repair error:', error);
+        res.status(500).json({ error: 'Error repairing account' });
     }
-});
-
-app.post('/api/logout', (req, res) => {
-    req.session.destroy((err) => {
-        if (err) {
-            return res.status(500).json({ error: 'Error logging out' });
-        }
-        res.json({ success: true });
-    });
 });
 
 app.get('/api/user', requireAuth, async (req, res) => {
     try {
-        const userDoc = await db.collection('users').doc(req.session.userId).get();
+        const userDoc = await db.collection('users').doc(req.userId).get();
 
         if (!userDoc.exists) {
             return res.status(404).json({ error: 'User not found' });
@@ -552,7 +403,7 @@ app.get('/api/user', requireAuth, async (req, res) => {
 
 app.get('/api/recipes', requireAuth, async (req, res) => {
     try {
-        const userId = req.session.userId;
+        const userId = req.userId;
 
         // Fetch all recipes (user's recipes + system recipes)
         const recipesSnapshot = await db.collection('recipes')
@@ -605,7 +456,7 @@ app.get('/api/recipes', requireAuth, async (req, res) => {
 app.post('/api/recipes', requireAuth, async (req, res) => {
     try {
         const { name, author, image, source, ingredients, instructions } = req.body;
-        const userId = req.session.userId;
+        const userId = req.userId;
 
         const recipeData = {
             user_id: userId,
@@ -634,6 +485,46 @@ app.post('/api/recipes', requireAuth, async (req, res) => {
     }
 });
 
+// Get single recipe by ID (public - for shared links)
+app.get('/api/recipes/:id', async (req, res) => {
+    try {
+        const recipeId = req.params.id;
+
+        const recipeDoc = await db.collection('recipes').doc(recipeId).get();
+
+        if (!recipeDoc.exists) {
+            return res.status(404).json({ error: 'Recipe not found' });
+        }
+
+        const recipeData = recipeDoc.data();
+
+        // Get ratings for this recipe
+        const ratingsSnapshot = await db.collection('ratings')
+            .where('recipe_id', '==', recipeId)
+            .get();
+
+        let totalRating = 0;
+        let ratingCount = 0;
+
+        ratingsSnapshot.forEach(ratingDoc => {
+            totalRating += ratingDoc.data().rating;
+            ratingCount++;
+        });
+
+        const recipe = {
+            id: recipeDoc.id,
+            ...recipeData,
+            averageRating: ratingCount > 0 ? Math.round((totalRating / ratingCount) * 10) / 10 : 0,
+            ratingCount
+        };
+
+        res.json({ recipe });
+    } catch (error) {
+        console.error('Error fetching recipe:', error);
+        res.status(500).json({ error: 'Error fetching recipe' });
+    }
+});
+
 // ============================================
 // RATING ROUTES
 // ============================================
@@ -641,7 +532,7 @@ app.post('/api/recipes', requireAuth, async (req, res) => {
 app.get('/api/recipes/:id/rating', async (req, res) => {
     try {
         const recipeId = req.params.id;
-        const userId = req.session.userId;
+        const userId = req.userId;
 
         // Get all ratings for this recipe
         const ratingsSnapshot = await db.collection('ratings')
@@ -677,7 +568,7 @@ app.get('/api/recipes/:id/rating', async (req, res) => {
 app.post('/api/recipes/:id/rating', requireAuth, async (req, res) => {
     try {
         const recipeId = req.params.id;
-        const userId = req.session.userId;
+        const userId = req.userId;
         const { rating } = req.body;
 
         // Validate rating
@@ -736,7 +627,7 @@ app.post('/api/recipes/:id/rating', requireAuth, async (req, res) => {
 
 app.get('/api/folders', requireAuth, async (req, res) => {
     try {
-        const userId = req.session.userId;
+        const userId = req.userId;
 
         // Parallel fetch: owned folders and collaborator relationships
         const [ownedFoldersSnapshot, collaboratorSnapshot] = await Promise.all([
@@ -818,7 +709,7 @@ app.get('/api/folders', requireAuth, async (req, res) => {
 
 app.post('/api/folders', requireAuth, async (req, res) => {
     try {
-        const userId = req.session.userId;
+        const userId = req.userId;
         const { name } = req.body;
 
         if (!name || !name.trim()) {
@@ -870,7 +761,7 @@ app.post('/api/folders', requireAuth, async (req, res) => {
 
 app.delete('/api/folders/:id', requireAuth, async (req, res) => {
     try {
-        const userId = req.session.userId;
+        const userId = req.userId;
         const folderId = req.params.id;
 
         // Get folder
@@ -938,7 +829,7 @@ app.delete('/api/folders/:id', requireAuth, async (req, res) => {
 
 app.get('/api/folders/:id/recipes', requireAuth, async (req, res) => {
     try {
-        const userId = req.session.userId;
+        const userId = req.userId;
         const folderId = req.params.id;
 
         // Check if user has access (owner or collaborator)
@@ -1042,7 +933,7 @@ app.get('/api/folders/:id/recipes', requireAuth, async (req, res) => {
 
 app.post('/api/folders/:id/recipes', requireAuth, async (req, res) => {
     try {
-        const userId = req.session.userId;
+        const userId = req.userId;
         const folderId = req.params.id;
         const { recipeId } = req.body;
 
@@ -1107,7 +998,7 @@ app.post('/api/folders/:id/recipes', requireAuth, async (req, res) => {
 
 app.delete('/api/folders/:id/recipes/:recipeId', requireAuth, async (req, res) => {
     try {
-        const userId = req.session.userId;
+        const userId = req.userId;
         const folderId = req.params.id;
         const recipeId = req.params.recipeId;
 
@@ -1161,7 +1052,7 @@ app.delete('/api/folders/:id/recipes/:recipeId', requireAuth, async (req, res) =
 
 app.get('/api/recipes/:id/folders', requireAuth, async (req, res) => {
     try {
-        const userId = req.session.userId;
+        const userId = req.userId;
         const recipeId = req.params.id;
 
         // Get all folder_recipes entries for this recipe
@@ -1205,7 +1096,7 @@ app.get('/api/recipes/:id/folders', requireAuth, async (req, res) => {
 
 app.post('/api/history/transfer', requireAuth, async (req, res) => {
     try {
-        const userId = req.session.userId;
+        const userId = req.userId;
         const { recipeIds } = req.body;
 
         if (!recipeIds || !Array.isArray(recipeIds)) {
@@ -1271,7 +1162,7 @@ app.post('/api/history/transfer', requireAuth, async (req, res) => {
 app.post('/api/folders/:id/invite', requireAuth, async (req, res) => {
     try {
         const folderId = req.params.id;
-        const userId = req.session.userId;
+        const userId = req.userId;
         const { email } = req.body;
 
         if (!email || !email.trim()) {
@@ -1403,7 +1294,7 @@ app.post('/api/folders/:id/invite', requireAuth, async (req, res) => {
 
 app.get('/api/invitations/pending', requireAuth, async (req, res) => {
     try {
-        const userId = req.session.userId;
+        const userId = req.userId;
 
         // Get user's email
         const userDoc = await db.collection('users').doc(userId).get();
@@ -1458,7 +1349,7 @@ app.get('/api/invitations/pending', requireAuth, async (req, res) => {
 app.post('/api/invitations/:token/accept', requireAuth, async (req, res) => {
     try {
         const token = req.params.token;
-        const userId = req.session.userId;
+        const userId = req.userId;
 
         // Get user's email
         const userDoc = await db.collection('users').doc(userId).get();
@@ -1518,7 +1409,7 @@ app.post('/api/invitations/:token/accept', requireAuth, async (req, res) => {
 app.get('/api/folders/:id/collaborators', requireAuth, async (req, res) => {
     try {
         const folderId = req.params.id;
-        const userId = req.session.userId;
+        const userId = req.userId;
 
         // Check if user has access to this folder
         const folderDoc = await db.collection('folders').doc(folderId).get();
@@ -1587,7 +1478,7 @@ app.delete('/api/folders/:id/collaborators/:userId', requireAuth, async (req, re
     try {
         const folderId = req.params.id;
         const collaboratorId = req.params.userId;
-        const userId = req.session.userId;
+        const userId = req.userId;
 
         // Check if user is the owner
         const folderDoc = await db.collection('folders').doc(folderId).get();
@@ -1623,6 +1514,164 @@ app.delete('/api/folders/:id/collaborators/:userId', requireAuth, async (req, re
     } catch (error) {
         console.error('Error removing collaborator:', error);
         res.status(500).json({ error: 'Error removing collaborator' });
+    }
+});
+
+// ============================================
+// User Profile & Settings
+// ============================================
+
+app.get('/api/user/profile', requireAuth, async (req, res) => {
+    try {
+        const userId = req.userId;
+
+        const userDoc = await db.collection('users').doc(userId).get();
+
+        if (!userDoc.exists) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+
+        const userData = userDoc.data();
+
+        res.json({
+            username: userData.username,
+            email: userData.email
+        });
+    } catch (error) {
+        console.error('Error fetching user profile:', error);
+        res.status(500).json({ error: 'Error fetching user profile' });
+    }
+});
+
+// Note: Password changes are handled by Firebase Auth on the client side
+
+// ============================================
+// Cooking Activity Tracking
+// ============================================
+
+app.post('/api/cooking-activity', requireAuth, async (req, res) => {
+    try {
+        const userId = req.userId;
+        const { recipeId, recipeName } = req.body;
+
+        if (!recipeId) {
+            return res.status(400).json({ error: 'Recipe ID is required' });
+        }
+
+        // Get today's date in YYYY-MM-DD format
+        const today = new Date().toISOString().split('T')[0];
+
+        // Check if already cooked this recipe today (prevent duplicates)
+        const existingSnapshot = await db.collection('cooking_activity')
+            .where('user_id', '==', userId)
+            .where('recipe_id', '==', recipeId)
+            .where('date', '==', today)
+            .get();
+
+        if (!existingSnapshot.empty) {
+            return res.json({ success: true, message: 'Already recorded today' });
+        }
+
+        // Record the cooking activity
+        await db.collection('cooking_activity').add({
+            user_id: userId,
+            recipe_id: recipeId,
+            recipe_name: recipeName || 'Unknown Recipe',
+            date: today,
+            created_at: new Date().toISOString()
+        });
+
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Error recording cooking activity:', error);
+        res.status(500).json({ error: 'Error recording cooking activity' });
+    }
+});
+
+app.get('/api/cooking-activity', requireAuth, async (req, res) => {
+    try {
+        const userId = req.userId;
+
+        // Get date range for past year
+        const endDate = new Date();
+        const startDate = new Date();
+        startDate.setFullYear(startDate.getFullYear() - 1);
+
+        const startDateStr = startDate.toISOString().split('T')[0];
+
+        // Fetch all cooking activity for the user in the past year
+        const activitySnapshot = await db.collection('cooking_activity')
+            .where('user_id', '==', userId)
+            .where('date', '>=', startDateStr)
+            .orderBy('date', 'desc')
+            .get();
+
+        // Group by date and count
+        const activityByDate = {};
+        let totalCooked = 0;
+
+        activitySnapshot.forEach(doc => {
+            const data = doc.data();
+            const date = data.date;
+
+            if (!activityByDate[date]) {
+                activityByDate[date] = 0;
+            }
+            activityByDate[date]++;
+            totalCooked++;
+        });
+
+        // Calculate streaks
+        const dates = Object.keys(activityByDate).sort().reverse();
+        let currentStreak = 0;
+        let longestStreak = 0;
+        let tempStreak = 0;
+
+        const today = new Date().toISOString().split('T')[0];
+        const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
+
+        // Check if streak includes today or yesterday
+        if (activityByDate[today] || activityByDate[yesterday]) {
+            let checkDate = activityByDate[today] ? new Date() : new Date(Date.now() - 86400000);
+
+            while (true) {
+                const dateStr = checkDate.toISOString().split('T')[0];
+                if (activityByDate[dateStr]) {
+                    currentStreak++;
+                    checkDate = new Date(checkDate.getTime() - 86400000);
+                } else {
+                    break;
+                }
+            }
+        }
+
+        // Calculate longest streak
+        for (let i = 0; i < dates.length; i++) {
+            const currentDate = new Date(dates[i]);
+            const nextDate = i < dates.length - 1 ? new Date(dates[i + 1]) : null;
+
+            tempStreak++;
+
+            if (nextDate) {
+                const diffDays = Math.round((currentDate - nextDate) / 86400000);
+                if (diffDays !== 1) {
+                    longestStreak = Math.max(longestStreak, tempStreak);
+                    tempStreak = 0;
+                }
+            } else {
+                longestStreak = Math.max(longestStreak, tempStreak);
+            }
+        }
+
+        res.json({
+            activityByDate,
+            totalCooked,
+            currentStreak,
+            longestStreak
+        });
+    } catch (error) {
+        console.error('Error fetching cooking activity:', error);
+        res.status(500).json({ error: 'Error fetching cooking activity' });
     }
 });
 

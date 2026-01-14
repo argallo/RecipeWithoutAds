@@ -133,5 +133,26 @@ service cloud.firestore {
       allow delete: if isAuthenticated()
         && resource.data.invited_by == request.auth.uid;
     }
+
+    // Cooking activity collection
+    match /cooking_activity/{activityId} {
+      // Users can read their own cooking activity
+      allow read: if isAuthenticated()
+        && resource.data.user_id == request.auth.uid;
+
+      // Users can create their own cooking activity
+      allow create: if isAuthenticated()
+        && request.resource.data.user_id == request.auth.uid;
+
+      // Users can delete their own cooking activity
+      allow delete: if isAuthenticated()
+        && resource.data.user_id == request.auth.uid;
+    }
+
+    // Sessions collection (legacy - can be cleaned up)
+    match /sessions/{sessionId} {
+      // No direct client access - managed by backend
+      allow read, write: if false;
+    }
   }
 }

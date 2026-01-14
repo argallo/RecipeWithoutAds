@@ -49,6 +49,23 @@
         { "fieldPath": "email", "order": "ASCENDING" },
         { "fieldPath": "accepted", "order": "ASCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "cooking_activity",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "user_id", "order": "ASCENDING" },
+        { "fieldPath": "date", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "cooking_activity",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "user_id", "order": "ASCENDING" },
+        { "fieldPath": "recipe_id", "order": "ASCENDING" },
+        { "fieldPath": "date", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

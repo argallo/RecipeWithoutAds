@@ -221,9 +221,30 @@ const invitationsModal = document.getElementById('invitationsModal');
 const invitationsList = document.getElementById('invitationsList');
 const closeInvitationsBtn = document.getElementById('closeInvitationsBtn');
 
+// User Settings DOM elements
+const userSettingsPage = document.getElementById('userSettingsPage');
+const settingsUsername = document.getElementById('settingsUsername');
+const settingsEmail = document.getElementById('settingsEmail');
+const userAvatar = document.getElementById('userAvatar');
+const changePasswordForm = document.getElementById('changePasswordForm');
+const currentPasswordInput = document.getElementById('currentPassword');
+const newPasswordInput = document.getElementById('newPassword');
+const confirmPasswordInput = document.getElementById('confirmPassword');
+const passwordError = document.getElementById('passwordError');
+const passwordSuccess = document.getElementById('passwordSuccess');
+const contributionGraph = document.getElementById('contributionGraph');
+const contributionMonths = document.getElementById('contributionMonths');
+const totalCookedEl = document.getElementById('totalCooked');
+const currentStreakEl = document.getElementById('currentStreak');
+const longestStreakEl = document.getElementById('longestStreak');
+
 // Authentication state
 let currentUser = null;
 let isAuthenticated = false;
+let isSigningUp = false; // Flag to prevent race condition during signup
+
+// Firebase Auth reference
+const auth = firebase.auth();
 
 // Folder state
 let folders = [];
@@ -298,6 +319,33 @@ function invalidateFolderCache(folderId) {
     }
 }
 
+function invalidateFoldersListCache() {
+    try {
+        const cached = localStorage.getItem(CACHE_KEY);
+        if (!cached) return;
+        const data = JSON.parse(cached);
+        delete data['folders'];
+        localStorage.setItem(CACHE_KEY, JSON.stringify(data));
+    } catch (e) {
+        console.error('Cache invalidation error:', e);
+    }
+}
+
+// Reload just the folders list (with counts) without changing current view
+async function reloadFoldersList() {
+    try {
+        const response = await apiFetch('/api/folders');
+        if (response.ok) {
+            const data = await response.json();
+            folders = data.folders;
+            setCachedData('folders', folders);
+            renderRecipeList();
+        }
+    } catch (error) {
+        console.error('Error reloading folders:', error);
+    }
+}
+
 // ============================================
 // LOADING STATES
 // ============================================
@@ -341,16 +389,25 @@ function showRecipeSkeletons() {
     `;
 }
 
-// API fetch helper - ensures credentials are included for session cookies
+// API fetch helper - includes Firebase ID token for authentication
 async function apiFetch(url, options = {}) {
-    const defaultOptions = {
-        credentials: 'include', // Required for session cookies
-        headers: {
-            'Content-Type': 'application/json',
-            ...options.headers
-        }
+    const headers = {
+        'Content-Type': 'application/json',
+        ...options.headers
     };
-    return fetch(url, { ...defaultOptions, ...options });
+
+    // Add Firebase ID token if user is authenticated
+    const firebaseUser = auth.currentUser;
+    if (firebaseUser) {
+        try {
+            const idToken = await firebaseUser.getIdToken();
+            headers['Authorization'] = `Bearer ${idToken}`;
+        } catch (error) {
+            console.error('Error getting ID token:', error);
+        }
+    }
+
+    return fetch(url, { ...options, headers });
 }
 
 // localStorage history helper functions
@@ -441,9 +498,9 @@ function getRecipeUrl(recipe) {
 
 // Extract recipe ID from URL path
 function extractRecipeId(path) {
-    // Match pattern: /recipe/{slug}-{id}
-    const match = path.match(/\/recipe\/.*-(\d+)$/);
-    return match ? parseInt(match[1]) : null;
+    // Match pattern: /recipe/{slug}-{id} where id can be alphanumeric (Firestore IDs)
+    const match = path.match(/\/recipe\/.*-([a-zA-Z0-9]+)$/);
+    return match ? match[1] : null;
 }
 
 // Navigate to a route and update browser history
@@ -457,18 +514,25 @@ function navigateTo(path, state = {}, replaceState = false) {
 }
 
 // Handle route changes
-function handleRoute(path) {
+async function handleRoute(path) {
     // Parse the path
     const pathParts = path.split('/').filter(p => p);
 
     if (pathParts.length === 0 || pathParts[0] === 'home') {
         // Home page
         showHomePage();
+    } else if (pathParts[0] === 'settings') {
+        // Settings page
+        if (isAuthenticated) {
+            showUserSettingsPage();
+        } else {
+            navigateTo('/home', {}, true);
+        }
     } else if (pathParts[0] === 'recipe') {
         // Recipe page - extract ID from slug
         const recipeId = extractRecipeId(path);
         if (recipeId) {
-            showRecipeById(recipeId, false); // false = don't push state again
+            await showRecipeById(recipeId, false); // false = don't push state again
         } else {
             // Invalid recipe URL, redirect to home
             navigateTo('/home', {}, true);
@@ -481,8 +545,9 @@ function handleRoute(path) {
 
 // Show home page without changing URL
 function showHomePage() {
-    // Hide recipe display and show landing page
+    // Hide other views and show landing page
     recipeDisplay.classList.add('hidden');
+    userSettingsPage.classList.add('hidden');
     landingPage.style.display = 'block';
 
     // Clear current recipe
@@ -515,12 +580,30 @@ function showHomePage() {
 }
 
 // Show recipe by ID without changing URL (for popstate)
-function showRecipeById(recipeId, pushState = true) {
+async function showRecipeById(recipeId, pushState = true) {
     // First try to find in current recipes, then in all recipes
     let recipe = getCurrentRecipes().find(r => r.id === recipeId);
     if (!recipe) {
         recipe = getCurrentRecipes(true).find(r => r.id === recipeId);
     }
+
+    // If not found locally, fetch from API (for shared links)
+    if (!recipe) {
+        try {
+            const response = await fetch(`/api/recipes/${recipeId}`);
+            if (response.ok) {
+                const data = await response.json();
+                recipe = data.recipe;
+                // Transform the recipe data to match expected format
+                if (recipe.source_data) {
+                    recipe.source = recipe.source_data;
+                }
+            }
+        } catch (error) {
+            console.error('Error fetching recipe:', error);
+        }
+    }
+
     if (!recipe) {
         console.error('Recipe not found:', recipeId);
         navigateTo('/home', {}, true);
@@ -591,8 +674,9 @@ function showRecipeById(recipeId, pushState = true) {
         displayRecipeRating(ratingData.averageRating, ratingData.ratingCount, ratingData.userRating);
     });
 
-    // Hide landing page and show recipe display
+    // Hide other views and show recipe display
     landingPage.style.display = 'none';
+    userSettingsPage.classList.add('hidden');
     recipeDisplay.classList.remove('hidden');
 
     renderRecipeList();
@@ -850,8 +934,20 @@ async function handleAddToFolder(folderId) {
         });
 
         if (response.ok) {
-            // Invalidate cache for this folder
+            // Invalidate caches
             invalidateFolderCache(folderId);
+            invalidateFoldersListCache();
+
+            // Reload folders to get accurate counts
+            await reloadFoldersList();
+
+            // If currently viewing this folder, refresh it
+            if (currentFolderId === folderId) {
+                const folder = folders.find(f => f.id === folderId);
+                const folderName = folder ? folder.name : '';
+                showFolder(folderId, folderName, true);
+            }
+
             return true;
         } else {
             const data = await response.json();
@@ -871,8 +967,12 @@ async function removeFromFolder(folderId, recipeId) {
         });
 
         if (response.ok) {
-            // Invalidate cache for this folder
+            // Invalidate caches
             invalidateFolderCache(folderId);
+            invalidateFoldersListCache();
+
+            // Reload folders to get accurate counts
+            await reloadFoldersList();
 
             // If currently viewing this folder, refresh
             if (currentFolderId === folderId) {
@@ -903,10 +1003,29 @@ async function addToHistory(recipe) {
 
     // Silently add to history folder
     try {
-        await apiFetch(`/api/folders/${historyFolder.id}/recipes`, {
+        const response = await apiFetch(`/api/folders/${historyFolder.id}/recipes`, {
             method: 'POST',
             body: JSON.stringify({ recipeId: String(recipe.id) })
         });
+
+        if (response.ok) {
+            const data = await response.json();
+
+            // Only refresh if recipe was actually added (not already in folder)
+            if (!data.message || !data.message.includes('already')) {
+                // Invalidate caches
+                invalidateFolderCache(historyFolder.id);
+                invalidateFoldersListCache();
+
+                // Reload folders to get accurate counts
+                await reloadFoldersList();
+
+                // If currently viewing History, refresh it
+                if (currentFolderId === historyFolder.id) {
+                    showFolder(historyFolder.id, 'History', true);
+                }
+            }
+        }
     } catch (error) {
         console.error('Error adding to history:', error);
     }
@@ -1551,24 +1670,60 @@ function renderLandingAutocomplete(suggestions) {
 
 // Authentication functions
 async function checkAuthStatus() {
-    try {
-        const response = await apiFetch('/api/user');
-        if (response.ok) {
-            const data = await response.json();
-            currentUser = data.user;
-            isAuthenticated = true;
-            updateAuthUI();
-            await loadFolders();
-        } else {
-            isAuthenticated = false;
-            currentUser = null;
-            updateAuthUI();
-        }
-    } catch (error) {
-        console.error('Error checking auth status:', error);
-        isAuthenticated = false;
-        updateAuthUI();
-    }
+    return new Promise((resolve) => {
+        // Use Firebase Auth state observer
+        auth.onAuthStateChanged(async (firebaseUser) => {
+            // Skip if signup is in progress - handleSignup will manage state
+            if (isSigningUp) {
+                resolve();
+                return;
+            }
+
+            if (firebaseUser) {
+                // User is signed in - fetch their profile
+                try {
+                    const response = await apiFetch('/api/user');
+                    if (response.ok) {
+                        const data = await response.json();
+                        currentUser = data.user;
+                        isAuthenticated = true;
+                        updateAuthUI();
+                        await loadFolders();
+                    } else {
+                        // User exists in Firebase Auth but not in Firestore
+                        // Try to repair the account (create/fix user doc and folders)
+                        console.log('User profile not found, attempting repair...');
+                        const repairResponse = await apiFetch('/api/user/repair', {
+                            method: 'POST'
+                        });
+                        if (repairResponse.ok) {
+                            const data = await repairResponse.json();
+                            currentUser = data.user;
+                            isAuthenticated = true;
+                            updateAuthUI();
+                            await loadFolders();
+                        } else {
+                            console.error('Failed to repair account');
+                            isAuthenticated = false;
+                            currentUser = null;
+                            updateAuthUI();
+                        }
+                    }
+                } catch (error) {
+                    console.error('Error fetching user profile:', error);
+                    isAuthenticated = false;
+                    currentUser = null;
+                    updateAuthUI();
+                }
+            } else {
+                // User is signed out
+                isAuthenticated = false;
+                currentUser = null;
+                updateAuthUI();
+            }
+            resolve();
+        });
+    });
 }
 
 function updateAuthUI() {
@@ -1590,30 +1745,33 @@ async function handleLogin(e) {
     const password = document.getElementById('loginPassword').value;
 
     try {
-        const response = await apiFetch('/api/login', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ email, password })
-        });
+        // Sign in with Firebase Auth
+        const userCredential = await auth.signInWithEmailAndPassword(email, password);
 
-        const data = await response.json();
+        // Firebase Auth will trigger onAuthStateChanged which handles the rest
+        loginModal.classList.add('hidden');
+        loginForm.reset();
 
-        if (response.ok) {
-            currentUser = data.user;
-            isAuthenticated = true;
-            updateAuthUI();
-            loginModal.classList.add('hidden');
-            loginForm.reset();
-            await syncHistoryToBackend();
-            await loadFolders();
-        } else {
-            loginError.textContent = data.error || 'Login failed';
-        }
+        // Sync history after login
+        await syncHistoryToBackend();
     } catch (error) {
         console.error('Login error:', error);
-        loginError.textContent = 'An error occurred. Please try again.';
+        // Map Firebase error codes to user-friendly messages
+        switch (error.code) {
+            case 'auth/user-not-found':
+            case 'auth/wrong-password':
+            case 'auth/invalid-credential':
+                loginError.textContent = 'Invalid email or password';
+                break;
+            case 'auth/invalid-email':
+                loginError.textContent = 'Invalid email address';
+                break;
+            case 'auth/too-many-requests':
+                loginError.textContent = 'Too many failed attempts. Please try again later.';
+                break;
+            default:
+                loginError.textContent = 'Login failed. Please try again.';
+        }
     }
 }
 
@@ -1621,70 +1779,331 @@ async function handleSignup(e) {
     e.preventDefault();
     signupError.textContent = '';
 
-    const username = document.getElementById('signupUsername').value;
-    const email = document.getElementById('signupEmail').value;
+    const username = document.getElementById('signupUsername').value.trim();
+    const email = document.getElementById('signupEmail').value.trim();
     const password = document.getElementById('signupPassword').value;
 
+    // Set flag to prevent onAuthStateChanged from interfering
+    isSigningUp = true;
+
     try {
-        const response = await apiFetch('/api/signup', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ username, email, password })
+        // Create user with Firebase Auth
+        const userCredential = await auth.createUserWithEmailAndPassword(email, password);
+
+        // Update display name in Firebase Auth
+        await userCredential.user.updateProfile({
+            displayName: username
         });
 
-        const data = await response.json();
+        // Create user document in Firestore via API
+        const response = await apiFetch('/api/user/create', {
+            method: 'POST',
+            body: JSON.stringify({ email, username })
+        });
 
         if (response.ok) {
+            const data = await response.json();
             currentUser = data.user;
             isAuthenticated = true;
             updateAuthUI();
             signupModal.classList.add('hidden');
             signupForm.reset();
-            await syncHistoryToBackend();
+
+            // Load folders (which were just created)
             await loadFolders();
+
+            // Sync any guest history
+            await syncHistoryToBackend();
         } else {
-            signupError.textContent = data.error || 'Signup failed';
+            const data = await response.json();
+            signupError.textContent = data.error || 'Error creating account';
         }
     } catch (error) {
         console.error('Signup error:', error);
-        signupError.textContent = 'An error occurred. Please try again.';
+        // Map Firebase error codes to user-friendly messages
+        switch (error.code) {
+            case 'auth/email-already-in-use':
+                signupError.textContent = 'Email already registered';
+                break;
+            case 'auth/invalid-email':
+                signupError.textContent = 'Invalid email address';
+                break;
+            case 'auth/weak-password':
+                signupError.textContent = 'Password must be at least 6 characters';
+                break;
+            default:
+                signupError.textContent = 'Signup failed. Please try again.';
+        }
+    } finally {
+        // Clear the flag
+        isSigningUp = false;
     }
 }
 
 async function handleLogout() {
     try {
-        const response = await apiFetch('/api/logout', {
-            method: 'POST'
-        });
+        // Sign out from Firebase Auth
+        await auth.signOut();
 
-        if (response.ok) {
-            currentUser = null;
-            isAuthenticated = false;
-            recipes = [];
-            allRecipes = [];
-            currentRecipeId = null;
-            searchQuery = '';
-            searchInput.value = '';
-            filteredRecipes = [];
-            folders = [];
-            currentFolderId = null;
-            currentFolderName = '';
+        // Clear local state
+        currentUser = null;
+        isAuthenticated = false;
+        recipes = [];
+        allRecipes = [];
+        currentRecipeId = null;
+        searchQuery = '';
+        searchInput.value = '';
+        filteredRecipes = [];
+        folders = [];
+        currentFolderId = null;
+        currentFolderName = '';
 
-            // Clear cache on logout
-            clearCache();
+        // Clear cache on logout
+        clearCache();
 
-            updateAuthUI();
-            renderRecipeList();
-            renderRandomRecipes();
+        updateAuthUI();
+        renderRecipeList();
+        renderRandomRecipes();
 
-            // Hide recipe display and show landing page
-            recipeDisplay.classList.add('hidden');
-            landingPage.style.display = 'block';
-        }
+        // Hide other views and show landing page
+        recipeDisplay.classList.add('hidden');
+        userSettingsPage.classList.add('hidden');
+        landingPage.style.display = 'block';
+
+        // Navigate to home
+        navigateTo('/home', {}, true);
     } catch (error) {
         console.error('Logout error:', error);
+    }
+}
+
+// ============================================
+// User Settings Functions
+// ============================================
+
+function showUserSettings() {
+    if (!isAuthenticated) return;
+    navigateTo('/settings');
+}
+
+async function showUserSettingsPage() {
+    if (!isAuthenticated) return;
+
+    // Hide other views
+    recipeDisplay.classList.add('hidden');
+    landingPage.style.display = 'none';
+
+    // Show settings page
+    userSettingsPage.classList.remove('hidden');
+
+    // Repair account to sync username from Firebase Auth and ensure folders exist
+    try {
+        const repairResponse = await apiFetch('/api/user/repair', { method: 'POST' });
+        if (repairResponse.ok) {
+            const data = await repairResponse.json();
+            // Update current user with repaired data
+            currentUser = data.user;
+            updateAuthUI();
+            settingsUsername.textContent = data.user.username;
+            settingsEmail.textContent = data.user.email;
+            userAvatar.textContent = data.user.username.charAt(0).toUpperCase();
+        }
+    } catch (error) {
+        console.error('Error repairing/loading user profile:', error);
+        // Fallback to just loading profile
+        try {
+            const response = await apiFetch('/api/user/profile');
+            if (response.ok) {
+                const data = await response.json();
+                settingsUsername.textContent = data.username;
+                settingsEmail.textContent = data.email;
+                userAvatar.textContent = data.username.charAt(0).toUpperCase();
+            }
+        } catch (e) {
+            console.error('Error loading user profile:', e);
+        }
+    }
+
+    // Load cooking activity
+    loadCookingActivity();
+
+    // Reload folders in case they were just created by repair
+    await loadFolders();
+}
+
+function hideUserSettings() {
+    userSettingsPage.classList.add('hidden');
+    recipeDisplay.classList.add('hidden');
+    landingPage.style.display = 'block';
+
+    // Reset password form
+    changePasswordForm.reset();
+    passwordError.textContent = '';
+    passwordSuccess.textContent = '';
+}
+
+async function handleChangePassword(e) {
+    e.preventDefault();
+
+    const currentPassword = currentPasswordInput.value;
+    const newPassword = newPasswordInput.value;
+    const confirmPassword = confirmPasswordInput.value;
+
+    passwordError.textContent = '';
+    passwordSuccess.textContent = '';
+
+    if (newPassword !== confirmPassword) {
+        passwordError.textContent = 'New passwords do not match';
+        return;
+    }
+
+    if (newPassword.length < 6) {
+        passwordError.textContent = 'Password must be at least 6 characters';
+        return;
+    }
+
+    try {
+        const user = auth.currentUser;
+        if (!user) {
+            passwordError.textContent = 'You must be logged in to change password';
+            return;
+        }
+
+        // Re-authenticate user before changing password
+        const credential = firebase.auth.EmailAuthProvider.credential(
+            user.email,
+            currentPassword
+        );
+        await user.reauthenticateWithCredential(credential);
+
+        // Update password
+        await user.updatePassword(newPassword);
+
+        passwordSuccess.textContent = 'Password updated successfully!';
+        changePasswordForm.reset();
+    } catch (error) {
+        console.error('Error changing password:', error);
+        switch (error.code) {
+            case 'auth/wrong-password':
+                passwordError.textContent = 'Current password is incorrect';
+                break;
+            case 'auth/weak-password':
+                passwordError.textContent = 'New password is too weak';
+                break;
+            case 'auth/requires-recent-login':
+                passwordError.textContent = 'Please log out and log in again before changing password';
+                break;
+            default:
+                passwordError.textContent = 'Error changing password';
+        }
+    }
+}
+
+async function loadCookingActivity() {
+    try {
+        const response = await apiFetch('/api/cooking-activity');
+        if (response.ok) {
+            const data = await response.json();
+
+            // Update stats
+            totalCookedEl.textContent = data.totalCooked;
+            currentStreakEl.textContent = data.currentStreak;
+            longestStreakEl.textContent = data.longestStreak;
+
+            // Build contribution graph
+            buildContributionGraph(data.activityByDate);
+        }
+    } catch (error) {
+        console.error('Error loading cooking activity:', error);
+    }
+}
+
+function buildContributionGraph(activityByDate) {
+    // Clear existing graph
+    contributionGraph.innerHTML = '';
+    contributionMonths.innerHTML = '';
+
+    // Generate 52 weeks x 7 days going back from today
+    const today = new Date();
+    today.setHours(23, 59, 59, 999); // End of today
+    const monthLabels = [];
+
+    // Start from 52 weeks ago, adjusted to start on Sunday
+    const startDate = new Date(today);
+    startDate.setDate(startDate.getDate() - (52 * 7));
+    const dayOfWeek = startDate.getDay();
+    startDate.setDate(startDate.getDate() - dayOfWeek);
+    startDate.setHours(0, 0, 0, 0);
+
+    let currentMonth = -1;
+
+    // Generate all 52 columns × 7 rows = 364 cells
+    for (let week = 0; week < 52; week++) {
+        for (let day = 0; day < 7; day++) {
+            const cellDate = new Date(startDate);
+            cellDate.setDate(startDate.getDate() + (week * 7) + day);
+
+            const cell = document.createElement('div');
+            cell.className = 'contribution-cell';
+
+            // Check if this is a future date
+            const isFuture = cellDate > today;
+
+            if (isFuture) {
+                // Future dates: show as empty/transparent
+                cell.classList.add('level-empty');
+                cell.title = '';
+            } else {
+                // Past/current dates: show activity level
+                const dateStr = cellDate.toISOString().split('T')[0];
+                const count = activityByDate[dateStr] || 0;
+
+                // Determine level (0-4)
+                let level = 0;
+                if (count >= 4) level = 4;
+                else if (count >= 3) level = 3;
+                else if (count >= 2) level = 2;
+                else if (count >= 1) level = 1;
+
+                cell.classList.add(`level-${level}`);
+                cell.dataset.date = dateStr;
+                cell.dataset.count = count;
+                cell.title = `${count} recipe${count !== 1 ? 's' : ''} on ${formatDate(cellDate)}`;
+            }
+
+            contributionGraph.appendChild(cell);
+
+            // Track month labels (on first day of week)
+            const month = cellDate.getMonth();
+            if (day === 0 && month !== currentMonth) {
+                currentMonth = month;
+                monthLabels.push({ week, month: cellDate.toLocaleString('default', { month: 'short' }) });
+            }
+        }
+    }
+
+    // Add month labels with proper spacing
+    monthLabels.forEach((label, index) => {
+        const span = document.createElement('span');
+        span.textContent = label.month;
+        contributionMonths.appendChild(span);
+    });
+}
+
+function formatDate(date) {
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+async function recordCookingActivity(recipeId, recipeName) {
+    if (!isAuthenticated) return;
+
+    try {
+        await apiFetch('/api/cooking-activity', {
+            method: 'POST',
+            body: JSON.stringify({ recipeId, recipeName })
+        });
+    } catch (error) {
+        console.error('Error recording cooking activity:', error);
     }
 }
 
@@ -2287,6 +2706,10 @@ function setupEventListeners() {
     showSignupBtn.addEventListener('click', switchToSignup);
     showLoginBtn.addEventListener('click', switchToLogin);
 
+    // User Settings event listeners
+    usernameDisplay.addEventListener('click', showUserSettings);
+    changePasswordForm.addEventListener('submit', handleChangePassword);
+
     // Folder event listeners
     addToFolderBtn.addEventListener('click', () => {
         if (!isAuthenticated) {
@@ -2672,11 +3095,20 @@ function checkRecipeCompletion(recipeId) {
     // Check if all instructions are checked
     const allComplete = state.instructions.every(checked => checked);
 
-    if (allComplete && !userRatings[recipeId]) {
-        // Show rating modal after a brief delay
-        setTimeout(() => {
-            showRatingModal(recipeId);
-        }, 500);
+    if (allComplete) {
+        // Record cooking activity
+        const currentRecipes = getCurrentRecipes();
+        const recipe = currentRecipes.find(r => r.id === recipeId);
+        if (recipe) {
+            recordCookingActivity(recipeId, recipe.name);
+        }
+
+        // Show rating modal if not rated yet
+        if (!userRatings[recipeId]) {
+            setTimeout(() => {
+                showRatingModal(recipeId);
+            }, 500);
+        }
     }
 }
 

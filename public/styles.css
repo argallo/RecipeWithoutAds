@@ -535,8 +535,8 @@ body::before {
 /* Logo */
 .site-logo {
     position: absolute;
-    top: 4px;
-    left: 48px;
+    top: -20px;
+    left: 20px;
     text-decoration: none;
     z-index: 100;
     transition: all 0.3s var(--ease-out);
@@ -1979,13 +1979,13 @@ body::before {
     }
 
     .site-logo {
-        top: 8px;
-        left: 70px;
+        top: -10px;
+        left: 60px;
         width: 180px;
     }
 
     .logo-image {
-        height: 105px;
+        height: 100px;
         margin-top: -10px;
     }
 
@@ -2236,5 +2236,362 @@ textarea:focus-visible {
 @keyframes spin {
     to {
         transform: rotate(360deg);
+    }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   User Settings Page
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.user-settings-page {
+    padding: 140px 20px 40px 20px;
+    max-width: 900px;
+    margin: 0 auto;
+}
+
+.settings-container {
+    display: flex;
+    flex-direction: column;
+    gap: 32px;
+}
+
+.settings-section h1 {
+    font-family: 'DM Serif Display', Georgia, serif;
+    color: var(--walnut);
+    font-size: 32px;
+    margin-bottom: 24px;
+    font-weight: 400;
+}
+
+.user-info-card {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    padding: 24px;
+    background: white;
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-md);
+    margin-bottom: 32px;
+}
+
+.user-avatar {
+    width: 80px;
+    height: 80px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--basil-green) 0%, var(--basil-dark) 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 32px;
+    color: white;
+    font-weight: 700;
+    font-family: 'DM Serif Display', Georgia, serif;
+    flex-shrink: 0;
+}
+
+.user-details {
+    flex: 1;
+}
+
+.info-row {
+    margin-bottom: 12px;
+}
+
+.info-row:last-child {
+    margin-bottom: 0;
+}
+
+.info-row label {
+    display: block;
+    font-size: 12px;
+    color: var(--stone);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 4px;
+    font-weight: 600;
+}
+
+.info-row span {
+    font-size: 18px;
+    color: var(--charcoal);
+    font-weight: 600;
+}
+
+/* Password Section */
+.password-section {
+    background: white;
+    padding: 24px;
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-md);
+}
+
+.password-section h3 {
+    font-family: 'DM Serif Display', Georgia, serif;
+    color: var(--walnut);
+    font-size: 20px;
+    margin-bottom: 20px;
+    font-weight: 400;
+}
+
+.password-section .form-group {
+    margin-bottom: 16px;
+}
+
+.password-section label {
+    display: block;
+    font-size: 14px;
+    color: var(--walnut);
+    margin-bottom: 6px;
+    font-weight: 600;
+}
+
+.password-section input {
+    width: 100%;
+    max-width: 400px;
+    padding: 12px 16px;
+    border: 2px solid var(--parchment);
+    border-radius: var(--radius-md);
+    font-family: inherit;
+    font-size: 15px;
+    transition: all 0.25s var(--ease-out);
+}
+
+.password-section input:focus {
+    outline: none;
+    border-color: var(--basil-green);
+    box-shadow: 0 0 0 4px rgba(74, 124, 89, 0.1);
+}
+
+.password-error {
+    color: var(--danger);
+    font-size: 14px;
+    margin-top: 8px;
+    min-height: 20px;
+    font-weight: 500;
+}
+
+.password-success {
+    color: var(--basil-green);
+    font-size: 14px;
+    margin-top: 8px;
+    min-height: 20px;
+    font-weight: 600;
+}
+
+.password-section .btn-primary {
+    margin-top: 8px;
+}
+
+/* Cooking Progress Section */
+.cooking-progress-section {
+    background: white;
+    padding: 24px;
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-md);
+}
+
+.cooking-progress-section h2 {
+    font-family: 'DM Serif Display', Georgia, serif;
+    color: var(--walnut);
+    font-size: 24px;
+    margin-bottom: 4px;
+    font-weight: 400;
+}
+
+.progress-subtitle {
+    color: var(--stone);
+    font-size: 14px;
+    margin-bottom: 24px;
+}
+
+.contribution-stats {
+    display: flex;
+    gap: 32px;
+    margin-bottom: 24px;
+    flex-wrap: wrap;
+}
+
+.stat-item {
+    display: flex;
+    flex-direction: column;
+}
+
+.stat-value {
+    font-size: 32px;
+    font-weight: 700;
+    color: var(--basil-green);
+    line-height: 1;
+}
+
+.stat-label {
+    font-size: 13px;
+    color: var(--stone);
+    margin-top: 4px;
+}
+
+/* GitHub-style Contribution Graph */
+.contribution-graph-container {
+    overflow-x: auto;
+    padding-bottom: 8px;
+}
+
+.contribution-months {
+    display: flex;
+    padding-left: 36px;
+    margin-bottom: 4px;
+    font-size: 11px;
+    color: var(--stone);
+}
+
+.contribution-months span {
+    flex: 1;
+    min-width: 52px;
+}
+
+.contribution-graph-wrapper {
+    display: flex;
+    gap: 4px;
+}
+
+.contribution-days {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-around;
+    font-size: 11px;
+    color: var(--stone);
+    padding-right: 8px;
+    height: 92px;
+}
+
+.contribution-graph {
+    display: grid;
+    grid-template-rows: repeat(7, 12px);
+    grid-auto-flow: column;
+    gap: 3px;
+}
+
+.contribution-cell {
+    width: 12px;
+    height: 12px;
+    border-radius: 2px;
+    background: var(--parchment);
+    cursor: pointer;
+    transition: transform 0.15s ease;
+}
+
+.contribution-cell:hover {
+    transform: scale(1.3);
+}
+
+.contribution-cell.level-empty { background: transparent; cursor: default; }
+.contribution-cell.level-0 { background: #ebedf0; } /* Gray for no activity */
+.contribution-cell.level-1 { background: #9be9a8; }
+.contribution-cell.level-2 { background: #40c463; }
+.contribution-cell.level-3 { background: #30a14e; }
+.contribution-cell.level-4 { background: #216e39; }
+
+.contribution-cell[data-tooltip]:hover::after {
+    content: attr(data-tooltip);
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--charcoal);
+    color: white;
+    padding: 6px 10px;
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+    white-space: nowrap;
+    z-index: 100;
+    margin-bottom: 4px;
+}
+
+.contribution-legend {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 12px;
+    justify-content: flex-end;
+    font-size: 11px;
+    color: var(--stone);
+}
+
+.legend-squares {
+    display: flex;
+    gap: 3px;
+}
+
+.legend-square {
+    width: 12px;
+    height: 12px;
+    border-radius: 2px;
+}
+
+.legend-square.level-0 { background: #ebedf0; } /* Gray for no activity */
+.legend-square.level-1 { background: #9be9a8; }
+.legend-square.level-2 { background: #40c463; }
+.legend-square.level-3 { background: #30a14e; }
+.legend-square.level-4 { background: #216e39; }
+
+/* Username button style */
+.username-display {
+    background: none;
+    border: none;
+    color: var(--basil-green);
+    font-weight: 700;
+    font-size: 14px;
+    cursor: pointer;
+    padding: 6px 0;
+    font-family: inherit;
+    transition: all 0.2s ease;
+}
+
+.username-display:hover {
+    color: var(--basil-dark);
+    text-decoration: underline;
+}
+
+/* Mobile adjustments for settings page */
+@media (max-width: 768px) {
+    .user-settings-page {
+        padding: 16px;
+    }
+
+    .settings-section h1 {
+        font-size: 26px;
+    }
+
+    .user-info-card {
+        flex-direction: column;
+        text-align: center;
+        padding: 20px;
+    }
+
+    .user-avatar {
+        width: 70px;
+        height: 70px;
+        font-size: 28px;
+    }
+
+    .contribution-stats {
+        gap: 20px;
+    }
+
+    .stat-value {
+        font-size: 26px;
+    }
+
+    .contribution-graph {
+        gap: 2px;
+    }
+
+    .contribution-cell {
+        width: 10px;
+        height: 10px;
+    }
+
+    .contribution-days {
+        font-size: 10px;
+        height: 80px;
     }
 }

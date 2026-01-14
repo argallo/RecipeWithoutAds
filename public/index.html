@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Recipe Collection</title>
     <base href="/">
-    <link rel="stylesheet" href="/styles.css?v=9">
+    <link rel="stylesheet" href="/styles.css?v=15">
 </head>
 
 <body>
@@ -35,7 +35,7 @@
             <div class="user-menu" id="userMenu">
                 <button class="login-btn" id="loginBtn">Login</button>
                 <div class="user-dropdown hidden" id="userDropdown">
-                    <span class="username-display" id="usernameDisplay"></span>
+                    <button class="username-display" id="usernameDisplay"></button>
                     <button class="logout-btn" id="logoutBtn">Logout</button>
                 </div>
             </div>
@@ -91,6 +91,93 @@
                     <section class="instructions-section">
                         <h2>Instructions</h2>
                         <ol id="instructionsList"></ol>
+                    </section>
+                </div>
+            </div>
+
+            <!-- User Settings Page -->
+            <div id="userSettingsPage" class="user-settings-page hidden">
+                <div class="settings-container">
+                    <section class="settings-section">
+                        <h1>Account Settings</h1>
+
+                        <div class="user-info-card">
+                            <div class="user-avatar" id="userAvatar"></div>
+                            <div class="user-details">
+                                <div class="info-row">
+                                    <label>Username</label>
+                                    <span id="settingsUsername"></span>
+                                </div>
+                                <div class="info-row">
+                                    <label>Email</label>
+                                    <span id="settingsEmail"></span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="password-section">
+                            <h3>Change Password</h3>
+                            <form id="changePasswordForm">
+                                <div class="form-group">
+                                    <label for="currentPassword">Current Password</label>
+                                    <input type="password" id="currentPassword" required>
+                                </div>
+                                <div class="form-group">
+                                    <label for="newPassword">New Password</label>
+                                    <input type="password" id="newPassword" required minlength="6">
+                                </div>
+                                <div class="form-group">
+                                    <label for="confirmPassword">Confirm New Password</label>
+                                    <input type="password" id="confirmPassword" required minlength="6">
+                                </div>
+                                <div class="password-error" id="passwordError"></div>
+                                <div class="password-success" id="passwordSuccess"></div>
+                                <button type="submit" class="btn-primary">Update Password</button>
+                            </form>
+                        </div>
+                    </section>
+
+                    <section class="cooking-progress-section">
+                        <h2>Cooking Progress</h2>
+                        <p class="progress-subtitle">Your cooking activity over the past year</p>
+
+                        <div class="contribution-stats">
+                            <div class="stat-item">
+                                <span class="stat-value" id="totalCooked">0</span>
+                                <span class="stat-label">Recipes Cooked</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-value" id="currentStreak">0</span>
+                                <span class="stat-label">Day Streak</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-value" id="longestStreak">0</span>
+                                <span class="stat-label">Longest Streak</span>
+                            </div>
+                        </div>
+
+                        <div class="contribution-graph-container">
+                            <div class="contribution-months" id="contributionMonths"></div>
+                            <div class="contribution-graph-wrapper">
+                                <div class="contribution-days">
+                                    <span>Mon</span>
+                                    <span>Wed</span>
+                                    <span>Fri</span>
+                                </div>
+                                <div class="contribution-graph" id="contributionGraph"></div>
+                            </div>
+                            <div class="contribution-legend">
+                                <span>Less</span>
+                                <div class="legend-squares">
+                                    <div class="legend-square level-0"></div>
+                                    <div class="legend-square level-1"></div>
+                                    <div class="legend-square level-2"></div>
+                                    <div class="legend-square level-3"></div>
+                                    <div class="legend-square level-4"></div>
+                                </div>
+                                <span>More</span>
+                            </div>
+                        </div>
                     </section>
                 </div>
             </div>
@@ -306,7 +393,11 @@
         </div>
     </div>
 
-    <script src="/script.js?v=7"></script>
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+    <script src="/__/firebase/init.js"></script>
+    <script src="/script.js?v=17"></script>
 </body>
 
 </html>
