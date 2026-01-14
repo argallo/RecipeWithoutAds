@@ -1423,6 +1423,459 @@ body::before {
     margin-top: 0;
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   Add Recipe Modal - Enhanced Design
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.add-recipe-modal {
+    max-width: 720px;
+}
+
+.add-recipe-modal h2 {
+    text-align: center;
+    margin-bottom: 32px;
+    padding-bottom: 20px;
+    border-bottom: 2px solid var(--parchment);
+}
+
+/* Form Sections */
+.form-section {
+    margin-bottom: 32px;
+}
+
+.form-section h3 {
+    font-family: 'DM Serif Display', Georgia, serif;
+    font-size: 20px;
+    font-weight: 400;
+    color: var(--walnut);
+    margin: 0;
+}
+
+.section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--parchment);
+}
+
+/* Image Upload */
+.image-upload-container {
+    position: relative;
+}
+
+.image-preview {
+    width: 100%;
+    height: 200px;
+    border: 2px dashed var(--sage);
+    border-radius: var(--radius-lg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    overflow: hidden;
+    position: relative;
+    background: var(--cream);
+    transition: all 0.2s var(--ease-out);
+}
+
+.image-preview:hover {
+    border-color: var(--basil-green);
+    background: rgba(74, 124, 89, 0.05);
+}
+
+.image-preview.has-image {
+    border-style: solid;
+    border-color: var(--basil-green);
+}
+
+.image-preview.dragging {
+    border-color: var(--basil-green);
+    background: rgba(74, 124, 89, 0.1);
+    transform: scale(1.01);
+}
+
+.preview-placeholder {
+    color: var(--sage);
+    font-size: 14px;
+    font-weight: 500;
+    text-align: center;
+    padding: 20px;
+}
+
+.image-preview.has-image .preview-placeholder {
+    display: none;
+}
+
+#imagePreviewImg {
+    display: none;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.image-preview.has-image #imagePreviewImg {
+    display: block;
+}
+
+.remove-image-btn {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.6);
+    color: white;
+    border: none;
+    font-size: 20px;
+    cursor: pointer;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s var(--ease-out);
+}
+
+.image-preview.has-image .remove-image-btn {
+    display: flex;
+}
+
+.remove-image-btn:hover {
+    background: var(--tomato);
+    transform: scale(1.1);
+}
+
+.image-input {
+    display: none;
+}
+
+.upload-progress {
+    display: none;
+    margin-top: 12px;
+    padding: 12px;
+    background: var(--cream);
+    border-radius: var(--radius-md);
+}
+
+.upload-progress.active {
+    display: block;
+}
+
+.progress-bar {
+    height: 6px;
+    background: var(--parchment);
+    border-radius: 3px;
+    overflow: hidden;
+    margin-bottom: 8px;
+}
+
+.progress-bar::after {
+    content: '';
+    display: block;
+    height: 100%;
+    width: var(--progress, 0%);
+    background: linear-gradient(90deg, var(--basil-green), var(--sage));
+    border-radius: 3px;
+    transition: width 0.3s var(--ease-out);
+}
+
+.progress-text {
+    font-size: 12px;
+    color: var(--walnut);
+    font-weight: 500;
+}
+
+/* Form Layout */
+.form-row-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+}
+
+.form-field {
+    display: flex;
+    flex-direction: column;
+    margin-bottom: 16px;
+}
+
+.form-field label {
+    margin: 0 0 8px 0;
+    font-size: 13px;
+}
+
+.form-field input,
+.form-field select,
+.form-field textarea {
+    margin: 0;
+}
+
+.optional-tag {
+    font-weight: 400;
+    font-size: 11px;
+    color: var(--stone);
+    text-transform: lowercase;
+    letter-spacing: 0;
+    margin-left: 6px;
+}
+
+/* Add Row Button */
+.btn-add-row {
+    background: var(--cream);
+    border: 2px dashed var(--basil-green);
+    color: var(--basil-green);
+    padding: 8px 16px;
+    border-radius: var(--radius-md);
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s var(--ease-out);
+}
+
+.btn-add-row:hover {
+    background: var(--basil-green);
+    border-style: solid;
+    color: white;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Ingredient Rows
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.ingredients-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.ingredient-row {
+    display: grid;
+    grid-template-columns: 80px 120px 1fr 40px;
+    gap: 10px;
+    align-items: center;
+    padding: 14px 16px;
+    background: var(--cream);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--parchment);
+    transition: all 0.2s var(--ease-out);
+    animation: ingredientSlideIn 0.25s var(--ease-out);
+}
+
+@keyframes ingredientSlideIn {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.ingredient-row:hover {
+    border-color: var(--basil-light);
+    box-shadow: var(--shadow-sm);
+}
+
+.ingredient-row input,
+.ingredient-row select {
+    padding: 10px 12px;
+    font-size: 14px;
+    margin: 0;
+}
+
+.ingredient-row .quantity-input {
+    text-align: center;
+}
+
+.ingredient-row .quantity-input::placeholder {
+    color: var(--stone);
+}
+
+.ingredient-row .unit-select {
+    cursor: pointer;
+}
+
+.ingredient-row .ingredient-input {
+    position: relative;
+}
+
+.ingredient-row .ingredient-name {
+    width: 100%;
+}
+
+/* Ingredient Autocomplete */
+.ingredient-autocomplete {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: white;
+    border: 2px solid var(--basil-green);
+    border-top: none;
+    border-radius: 0 0 var(--radius-md) var(--radius-md);
+    max-height: 200px;
+    overflow-y: auto;
+    z-index: 100;
+    box-shadow: var(--shadow-md);
+}
+
+.ingredient-autocomplete-item {
+    padding: 10px 14px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: background 0.15s;
+}
+
+.ingredient-autocomplete-item:hover,
+.ingredient-autocomplete-item.selected {
+    background: var(--cream);
+    color: var(--basil-dark);
+}
+
+/* Remove Button */
+.btn-remove-row {
+    width: 36px;
+    height: 36px;
+    border: none;
+    background: transparent;
+    color: var(--stone);
+    font-size: 20px;
+    cursor: pointer;
+    border-radius: var(--radius-sm);
+    transition: all 0.2s var(--ease-out);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.btn-remove-row:hover {
+    background: var(--danger);
+    color: white;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Instruction Steps
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.instructions-list {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.instruction-step {
+    display: flex;
+    gap: 16px;
+    align-items: flex-start;
+    animation: stepSlideIn 0.3s var(--ease-out);
+}
+
+@keyframes stepSlideIn {
+    from {
+        opacity: 0;
+        transform: translateX(-20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+.step-number {
+    flex-shrink: 0;
+    width: 44px;
+    height: 44px;
+    background: linear-gradient(135deg, var(--basil-green), var(--basil-dark));
+    color: white;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'DM Serif Display', Georgia, serif;
+    font-size: 18px;
+    font-weight: 400;
+    box-shadow: var(--shadow-sm);
+}
+
+.step-content {
+    flex: 1;
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+}
+
+.step-content textarea {
+    flex: 1;
+    min-height: 80px;
+    padding: 14px 16px;
+    font-size: 14px;
+    line-height: 1.5;
+    resize: vertical;
+    margin: 0;
+}
+
+.step-content .btn-remove-row {
+    margin-top: 4px;
+}
+
+/* Empty State */
+.empty-list-message {
+    text-align: center;
+    padding: 32px 20px;
+    color: var(--stone);
+    font-size: 14px;
+    background: var(--cream);
+    border: 2px dashed var(--parchment);
+    border-radius: var(--radius-md);
+}
+
+.empty-list-message span {
+    display: block;
+    font-size: 24px;
+    margin-bottom: 8px;
+}
+
+/* Responsive */
+@media (max-width: 600px) {
+    .form-row-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .ingredient-row {
+        grid-template-columns: 60px 90px 1fr 36px;
+        gap: 8px;
+        padding: 12px;
+    }
+
+    .ingredient-row input,
+    .ingredient-row select {
+        padding: 8px 10px;
+        font-size: 13px;
+    }
+
+    .instruction-step {
+        gap: 12px;
+    }
+
+    .step-number {
+        width: 36px;
+        height: 36px;
+        font-size: 16px;
+    }
+
+    .section-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 12px;
+    }
+
+    .btn-add-row {
+        width: 100%;
+    }
+}
+
 .modal-buttons {
     display: flex;
     gap: 12px;

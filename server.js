@@ -536,6 +536,22 @@ app.get('/api/recipes', requireAuth, (req, res) => {
 app.post('/api/recipes', requireAuth, (req, res) => {
     const { name, author, image, source, ingredients, instructions } = req.body;
 
+    console.log('Received recipe data:', { name, author, source });
+
+    if (!name || !author || !source || !ingredients || !instructions) {
+        console.log('Validation failed: missing fields', { name: !!name, author: !!author, source: !!source, ingredients: !!ingredients, instructions: !!instructions });
+        return res.status(400).json({ error: 'Missing required fields' });
+    }
+
+    if (!source.type) {
+        console.log('Validation failed: missing source type');
+        return res.status(400).json({ error: 'Source type is required' });
+    }
+
+    if (!Array.isArray(ingredients) || !Array.isArray(instructions)) {
+        return res.status(400).json({ error: 'Ingredients and instructions must be arrays' });
+    }
+
     db.run(
         `INSERT INTO recipes (user_id, name, author, image, source_type, source_data, ingredients, instructions)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -551,6 +567,7 @@ app.post('/api/recipes', requireAuth, (req, res) => {
         ],
         function (err) {
             if (err) {
+                console.error('DB Insert Error:', err);
                 return res.status(500).json({ error: 'Error saving recipe' });
             }
 

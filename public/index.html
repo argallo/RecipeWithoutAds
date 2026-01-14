@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Recipe Collection</title>
     <base href="/">
-    <link rel="stylesheet" href="/styles.css?v=16">
+    <link rel="stylesheet" href="/styles.css?v=22">
 </head>
 
 <body>
@@ -205,47 +205,93 @@
     </div>
 
     <div id="addRecipeModal" class="modal hidden">
-        <div class="modal-content">
+        <div class="modal-content add-recipe-modal">
             <h2>Add New Recipe</h2>
             <form id="addRecipeForm">
-                <label for="recipeName">Recipe Name:</label>
-                <input type="text" id="recipeName" required>
+                <!-- Basic Info Section -->
+                <div class="form-section">
+                    <div class="form-row-grid">
+                        <div class="form-field">
+                            <label for="recipeName">Recipe Name</label>
+                            <input type="text" id="recipeName" placeholder="e.g., Grandma's Apple Pie" required>
+                        </div>
+                        <div class="form-field">
+                            <label for="recipeAuthor">Author</label>
+                            <input type="text" id="recipeAuthor" placeholder="Who created this recipe?" required>
+                        </div>
+                    </div>
 
-                <label for="recipeAuthor">Author:</label>
-                <input type="text" id="recipeAuthor" required>
+                    <div class="form-field">
+                        <label for="recipeImage">Recipe Photo <span class="optional-tag">optional</span></label>
+                        <div class="image-upload-container">
+                            <div class="image-preview" id="imagePreview">
+                                <span class="preview-placeholder">Click or drag to add photo</span>
+                                <img id="imagePreviewImg" src="" alt="Preview">
+                                <button type="button" class="remove-image-btn" id="removeImageBtn">&times;</button>
+                            </div>
+                            <input type="file" id="recipeImageInput" accept="image/*" class="image-input">
+                            <div class="upload-progress" id="uploadProgress">
+                                <div class="progress-bar" id="progressBar"></div>
+                                <span class="progress-text" id="progressText">Uploading...</span>
+                            </div>
+                        </div>
+                    </div>
 
-                <label for="recipeImage">Image URL (optional):</label>
-                <input type="url" id="recipeImageUrl">
+                    <div class="form-field">
+                        <label for="recipeSourceSelect">Source</label>
+                        <select id="recipeSourceSelect" required>
+                            <option value="">Where did this recipe come from?</option>
+                            <option value="youtube">YouTube</option>
+                            <option value="cookbook">Cookbook</option>
+                            <option value="manual">My Own Creation</option>
+                        </select>
+                    </div>
 
-                <label for="recipeSource">Source:</label>
-                <select id="recipeSource" required>
-                    <option value="">Select a source</option>
-                    <option value="youtube">YouTube</option>
-                    <option value="cookbook">Cookbook</option>
-                    <option value="manual">Manually Entered</option>
-                </select>
+                    <div id="youtubeFields" class="conditional-field hidden">
+                        <div class="form-field">
+                            <label for="youtubeUrl">YouTube URL</label>
+                            <input type="url" id="youtubeUrl" placeholder="https://www.youtube.com/watch?v=...">
+                        </div>
+                    </div>
 
-                <div id="youtubeFields" class="conditional-field hidden">
-                    <label for="youtubeUrl">YouTube URL:</label>
-                    <input type="url" id="youtubeUrl" placeholder="https://www.youtube.com/watch?v=...">
+                    <div id="cookbookFields" class="conditional-field hidden">
+                        <div class="form-row-grid">
+                            <div class="form-field">
+                                <label for="bookName">Cookbook Name</label>
+                                <input type="text" id="bookName" placeholder="e.g., Joy of Cooking">
+                            </div>
+                            <div class="form-field">
+                                <label for="amazonLink">Amazon Link <span class="optional-tag">optional</span></label>
+                                <input type="url" id="amazonLink" placeholder="https://www.amazon.com/...">
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
-                <div id="cookbookFields" class="conditional-field hidden">
-                    <label for="bookName">Cookbook Name:</label>
-                    <input type="text" id="bookName">
-
-                    <label for="amazonLink">Amazon Affiliate Link:</label>
-                    <input type="url" id="amazonLink" placeholder="https://www.amazon.com/...">
+                <!-- Ingredients Section -->
+                <div class="form-section ingredients-section">
+                    <div class="section-header">
+                        <h3>Ingredients</h3>
+                        <button type="button" class="btn-add-row" id="addIngredientBtn">+ Add Ingredient</button>
+                    </div>
+                    <div class="ingredients-list" id="formIngredientsList">
+                        <!-- Ingredient rows will be added here dynamically -->
+                    </div>
                 </div>
 
-                <label for="recipeIngredients">Ingredients (one per line):</label>
-                <textarea id="recipeIngredients" rows="8" required></textarea>
-
-                <label for="recipeInstructions">Instructions (one per line):</label>
-                <textarea id="recipeInstructions" rows="8" required></textarea>
+                <!-- Instructions Section -->
+                <div class="form-section instructions-section">
+                    <div class="section-header">
+                        <h3>Instructions</h3>
+                        <button type="button" class="btn-add-row" id="addInstructionBtn">+ Add Step</button>
+                    </div>
+                    <div class="instructions-list" id="formInstructionsList">
+                        <!-- Instruction steps will be added here dynamically -->
+                    </div>
+                </div>
 
                 <div class="modal-buttons">
-                    <button type="submit" class="btn-primary">Add Recipe</button>
+                    <button type="submit" class="btn-primary">Save Recipe</button>
                     <button type="button" class="btn-secondary" id="cancelBtn">Cancel</button>
                 </div>
             </form>
@@ -426,8 +472,9 @@
     <!-- Firebase SDK -->
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-storage-compat.js"></script>
     <script src="/__/firebase/init.js"></script>
-    <script src="/script.js?v=19"></script>
+    <script src="/script.js?v=24"></script>
 </body>
 
 </html>

@@ -1,0 +1,19 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Recipe images - users can upload/read their own images
+    match /recipes/{userId}/{allPaths=**} {
+      // Anyone can read recipe images (for shared recipes)
+      allow read: if true;
+
+      // Only authenticated users can upload to their own folder
+      allow write: if request.auth != null
+                   && request.auth.uid == userId
+                   && request.resource.size < 5 * 1024 * 1024 // Max 5MB
+                   && request.resource.contentType.matches('image/.*');
+
+      // Users can delete their own images
+      allow delete: if request.auth != null && request.auth.uid == userId;
+    }
+  }
+}

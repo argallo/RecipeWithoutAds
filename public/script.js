@@ -247,6 +247,11 @@ let isSigningUp = false; // Flag to prevent race condition during signup
 
 // Firebase Auth reference
 const auth = firebase.auth();
+const storage = firebase.storage();
+
+// Image upload state
+let selectedImageFile = null;
+let uploadedImageUrl = null;
 
 // Folder state
 let folders = [];
@@ -615,6 +620,9 @@ async function showRecipeById(recipeId, pushState = true) {
     if (pushState) {
         const recipeUrl = getRecipeUrl(recipe);
         navigateTo(recipeUrl, { recipeId });
+        // navigateTo will call handleRoute which calls showRecipeById again with pushState=false
+        // So we return here to avoid duplicate work
+        return;
     }
 
     currentRecipeId = recipeId;
@@ -2227,6 +2235,8 @@ async function init() {
     filteredRecipes = [];
     setupEventListeners();
     setupRatingEventListeners();
+    initAddRecipeForm();
+    initImageUpload();
     await checkAuthStatus();
 
     // Handle invitation from URL
@@ -2709,6 +2719,10 @@ function setupEventListeners() {
             showLoginModal();
             return;
         }
+        // Ensure form is initialized
+        if (!formIngredientsList || !formInstructionsList) {
+            initAddRecipeForm();
+        }
         addRecipeModal.classList.remove('hidden');
     });
 
@@ -2716,20 +2730,20 @@ function setupEventListeners() {
 
     cancelBtn.addEventListener('click', () => {
         addRecipeModal.classList.add('hidden');
-        addRecipeForm.reset();
+        resetAddRecipeForm();
         hideAllConditionalFields();
     });
 
     addRecipeModal.addEventListener('click', (e) => {
         if (e.target === addRecipeModal) {
             addRecipeModal.classList.add('hidden');
-            addRecipeForm.reset();
+            resetAddRecipeForm();
             hideAllConditionalFields();
         }
     });
 
     // Handle source dropdown change
-    const sourceDropdown = document.getElementById('recipeSource');
+    const sourceDropdown = document.getElementById('recipeSourceSelect');
     sourceDropdown.addEventListener('change', (e) => {
         const sourceType = e.target.value;
         hideAllConditionalFields();
@@ -2868,6 +2882,526 @@ function hideAllConditionalFields() {
     document.getElementById('amazonLink').required = false;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// ADD RECIPE FORM - Dynamic Ingredients & Instructions
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Common cooking ingredients for autocomplete
+const commonIngredients = [
+    // Proteins
+    'chicken breast', 'chicken thighs', 'ground beef', 'ground turkey', 'bacon', 'sausage',
+    'salmon', 'shrimp', 'tuna', 'cod', 'tilapia', 'pork chops', 'pork tenderloin',
+    'beef steak', 'lamb', 'tofu', 'tempeh', 'eggs',
+    // Dairy
+    'butter', 'milk', 'heavy cream', 'half and half', 'sour cream', 'cream cheese',
+    'cheddar cheese', 'mozzarella cheese', 'parmesan cheese', 'feta cheese', 'goat cheese',
+    'greek yogurt', 'yogurt', 'ricotta cheese', 'swiss cheese', 'provolone',
+    // Vegetables
+    'onion', 'garlic', 'tomatoes', 'bell pepper', 'jalapeño', 'carrot', 'celery',
+    'potato', 'sweet potato', 'broccoli', 'cauliflower', 'spinach', 'kale', 'lettuce',
+    'cabbage', 'zucchini', 'squash', 'mushrooms', 'corn', 'green beans', 'peas',
+    'asparagus', 'cucumber', 'avocado', 'eggplant', 'brussels sprouts', 'leek', 'shallot',
+    'green onion', 'ginger', 'beets', 'radish', 'artichoke',
+    // Fruits
+    'lemon', 'lime', 'orange', 'apple', 'banana', 'strawberries', 'blueberries',
+    'raspberries', 'mango', 'pineapple', 'peach', 'pear', 'grapes', 'watermelon',
+    // Grains & Pasta
+    'rice', 'brown rice', 'quinoa', 'pasta', 'spaghetti', 'penne', 'fettuccine',
+    'bread', 'bread crumbs', 'flour', 'all-purpose flour', 'whole wheat flour',
+    'oats', 'couscous', 'tortillas', 'pita bread', 'noodles', 'ramen',
+    // Canned & Jarred
+    'tomato sauce', 'tomato paste', 'diced tomatoes', 'crushed tomatoes',
+    'coconut milk', 'chicken broth', 'beef broth', 'vegetable broth',
+    'black beans', 'kidney beans', 'chickpeas', 'lentils', 'olives',
+    // Oils & Vinegars
+    'olive oil', 'vegetable oil', 'coconut oil', 'sesame oil', 'avocado oil',
+    'balsamic vinegar', 'red wine vinegar', 'apple cider vinegar', 'rice vinegar',
+    // Seasonings & Spices
+    'salt', 'black pepper', 'paprika', 'cumin', 'chili powder', 'cayenne pepper',
+    'oregano', 'basil', 'thyme', 'rosemary', 'parsley', 'cilantro', 'dill',
+    'cinnamon', 'nutmeg', 'ginger powder', 'turmeric', 'curry powder', 'bay leaves',
+    'red pepper flakes', 'italian seasoning', 'garlic powder', 'onion powder',
+    // Condiments & Sauces
+    'soy sauce', 'worcestershire sauce', 'hot sauce', 'honey', 'maple syrup',
+    'mustard', 'dijon mustard', 'mayonnaise', 'ketchup', 'salsa', 'pesto',
+    'bbq sauce', 'teriyaki sauce', 'fish sauce', 'oyster sauce', 'hoisin sauce',
+    // Baking
+    'sugar', 'brown sugar', 'powdered sugar', 'vanilla extract', 'baking powder',
+    'baking soda', 'yeast', 'cocoa powder', 'chocolate chips', 'cornstarch',
+    // Nuts & Seeds
+    'almonds', 'walnuts', 'pecans', 'peanuts', 'cashews', 'pine nuts',
+    'sesame seeds', 'sunflower seeds', 'chia seeds', 'flax seeds', 'peanut butter'
+];
+
+// Measurement units
+const measurementUnits = [
+    { value: '', label: '—' },
+    { value: 'tsp', label: 'tsp' },
+    { value: 'tbsp', label: 'tbsp' },
+    { value: 'cup', label: 'cup' },
+    { value: 'oz', label: 'oz' },
+    { value: 'lb', label: 'lb' },
+    { value: 'g', label: 'g' },
+    { value: 'kg', label: 'kg' },
+    { value: 'ml', label: 'ml' },
+    { value: 'L', label: 'L' },
+    { value: 'pinch', label: 'pinch' },
+    { value: 'dash', label: 'dash' },
+    { value: 'clove', label: 'clove' },
+    { value: 'slice', label: 'slice' },
+    { value: 'piece', label: 'piece' },
+    { value: 'can', label: 'can' },
+    { value: 'bunch', label: 'bunch' },
+    { value: 'sprig', label: 'sprig' }
+];
+
+// ═══════════════════════════════════════════════════════════════════════════
+//    IMAGE UPLOAD FUNCTIONS
+// ═══════════════════════════════════════════════════════════════════════════
+
+function initImageUpload() {
+    const imageInput = document.getElementById('recipeImageInput');
+    const imagePreview = document.getElementById('imagePreview');
+    const imagePreviewImg = document.getElementById('imagePreviewImg');
+    const removeImageBtn = document.getElementById('removeImageBtn');
+
+    if (!imageInput || !imagePreview) {
+        console.error('Image upload elements not found');
+        return;
+    }
+
+    // Click on preview to open file picker
+    imagePreview.addEventListener('click', (e) => {
+        // Don't trigger if clicking the remove button
+        if (e.target === removeImageBtn || e.target.closest('.remove-image-btn')) {
+            return;
+        }
+        imageInput.click();
+    });
+
+    // File input change
+    imageInput.addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (file) {
+            handleImageSelect(file);
+        }
+    });
+
+    // Drag and drop
+    imagePreview.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        imagePreview.classList.add('dragging');
+    });
+
+    imagePreview.addEventListener('dragleave', (e) => {
+        e.preventDefault();
+        imagePreview.classList.remove('dragging');
+    });
+
+    imagePreview.addEventListener('drop', (e) => {
+        e.preventDefault();
+        imagePreview.classList.remove('dragging');
+        const file = e.dataTransfer.files[0];
+        if (file && file.type.startsWith('image/')) {
+            handleImageSelect(file);
+            // Update the file input
+            const dataTransfer = new DataTransfer();
+            dataTransfer.items.add(file);
+            imageInput.files = dataTransfer.files;
+        }
+    });
+
+    // Remove image button
+    removeImageBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        clearImagePreview();
+    });
+}
+
+function handleImageSelect(file) {
+    // Validate file size (max 5MB)
+    const maxSize = 5 * 1024 * 1024;
+    if (file.size > maxSize) {
+        alert('Image is too large. Please select an image under 5MB.');
+        return;
+    }
+
+    // Validate file type
+    if (!file.type.startsWith('image/')) {
+        alert('Please select a valid image file.');
+        return;
+    }
+
+    selectedImageFile = file;
+    uploadedImageUrl = null;
+
+    // Show preview
+    const imagePreview = document.getElementById('imagePreview');
+    const imagePreviewImg = document.getElementById('imagePreviewImg');
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        imagePreviewImg.src = e.target.result;
+        imagePreview.classList.add('has-image');
+    };
+    reader.readAsDataURL(file);
+}
+
+function clearImagePreview() {
+    const imageInput = document.getElementById('recipeImageInput');
+    const imagePreview = document.getElementById('imagePreview');
+    const imagePreviewImg = document.getElementById('imagePreviewImg');
+
+    selectedImageFile = null;
+    uploadedImageUrl = null;
+    imageInput.value = '';
+    imagePreviewImg.src = '';
+    imagePreview.classList.remove('has-image');
+}
+
+async function uploadRecipeImage(file) {
+    if (!file || !currentUser) return null;
+
+    const progressContainer = document.getElementById('uploadProgress');
+    const progressBar = document.getElementById('progressBar');
+    const progressText = document.getElementById('progressText');
+
+    try {
+        progressContainer.classList.add('active');
+        progressText.textContent = 'Uploading...';
+
+        // Create unique filename
+        const timestamp = Date.now();
+        const safeName = file.name.replace(/[^a-zA-Z0-9.]/g, '_');
+        const path = `recipes/${currentUser.id}/${timestamp}_${safeName}`;
+
+        const storageRef = storage.ref(path);
+        const uploadTask = storageRef.put(file);
+
+        return new Promise((resolve, reject) => {
+            uploadTask.on('state_changed',
+                (snapshot) => {
+                    // Progress
+                    const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+                    progressBar.style.setProperty('--progress', progress + '%');
+                    progressText.textContent = `Uploading... ${Math.round(progress)}%`;
+                },
+                (error) => {
+                    // Error
+                    console.error('Upload error:', error);
+                    progressContainer.classList.remove('active');
+                    reject(error);
+                },
+                async () => {
+                    // Complete
+                    progressText.textContent = 'Upload complete!';
+                    const downloadUrl = await uploadTask.snapshot.ref.getDownloadURL();
+                    setTimeout(() => {
+                        progressContainer.classList.remove('active');
+                    }, 1000);
+                    resolve(downloadUrl);
+                }
+            );
+        });
+    } catch (error) {
+        console.error('Error uploading image:', error);
+        progressContainer.classList.remove('active');
+        return null;
+    }
+}
+
+// DOM elements for add recipe form (initialized in initAddRecipeForm)
+let formIngredientsList = null;
+let formInstructionsList = null;
+let addIngredientBtn = null;
+let addInstructionBtn = null;
+
+let ingredientRowCount = 0;
+let instructionStepCount = 0;
+
+// Initialize the add recipe form
+function initAddRecipeForm() {
+    // Get DOM elements
+    formIngredientsList = document.getElementById('formIngredientsList');
+    formInstructionsList = document.getElementById('formInstructionsList');
+    addIngredientBtn = document.getElementById('addIngredientBtn');
+    addInstructionBtn = document.getElementById('addInstructionBtn');
+
+    if (!formIngredientsList || !formInstructionsList || !addIngredientBtn || !addInstructionBtn) {
+        console.error('Add recipe form elements not found');
+        return;
+    }
+
+    // Add initial rows
+    addIngredientRow();
+    addIngredientRow();
+    addIngredientRow();
+    addInstructionStep();
+
+    // Event listeners for add buttons
+    addIngredientBtn.addEventListener('click', addIngredientRow);
+    addInstructionBtn.addEventListener('click', addInstructionStep);
+}
+
+// Add a new ingredient row
+function addIngredientRow() {
+    if (!formIngredientsList) {
+        console.error('formIngredientsList not initialized');
+        return;
+    }
+    ingredientRowCount++;
+    const row = document.createElement('div');
+    row.className = 'ingredient-row';
+    row.dataset.id = ingredientRowCount;
+
+    // Build unit options
+    const unitOptions = measurementUnits.map(u =>
+        `<option value="${u.value}">${u.label}</option>`
+    ).join('');
+
+    row.innerHTML = `
+        <input type="text" class="quantity-input" placeholder="Qty" inputmode="decimal">
+        <select class="unit-select">
+            ${unitOptions}
+        </select>
+        <div class="ingredient-input">
+            <input type="text" class="ingredient-name" placeholder="Ingredient name" autocomplete="off">
+        </div>
+        <button type="button" class="btn-remove-row" title="Remove ingredient">&times;</button>
+    `;
+
+    // Add event listeners
+    const removeBtn = row.querySelector('.btn-remove-row');
+    removeBtn.addEventListener('click', () => removeIngredientRow(row));
+
+    const ingredientInput = row.querySelector('.ingredient-name');
+    ingredientInput.addEventListener('input', (e) => showIngredientAutocomplete(e.target, row));
+    ingredientInput.addEventListener('blur', () => {
+        // Delay to allow click on autocomplete item
+        setTimeout(() => hideIngredientAutocomplete(row), 150);
+    });
+    ingredientInput.addEventListener('keydown', (e) => handleAutocompleteKeydown(e, row));
+
+    formIngredientsList.appendChild(row);
+    updateEmptyState();
+}
+
+// Remove an ingredient row
+function removeIngredientRow(row) {
+    row.style.animation = 'ingredientSlideIn 0.2s var(--ease-out) reverse';
+    setTimeout(() => {
+        row.remove();
+        updateEmptyState();
+    }, 200);
+}
+
+// Show ingredient autocomplete
+function showIngredientAutocomplete(input, row) {
+    const value = input.value.toLowerCase().trim();
+    hideIngredientAutocomplete(row);
+
+    if (value.length < 2) return;
+
+    const matches = commonIngredients.filter(ing =>
+        ing.toLowerCase().includes(value)
+    ).slice(0, 8);
+
+    if (matches.length === 0) return;
+
+    const dropdown = document.createElement('div');
+    dropdown.className = 'ingredient-autocomplete';
+
+    matches.forEach((match, index) => {
+        const item = document.createElement('div');
+        item.className = 'ingredient-autocomplete-item';
+        item.textContent = match;
+        item.dataset.index = index;
+        item.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            input.value = match;
+            hideIngredientAutocomplete(row);
+        });
+        dropdown.appendChild(item);
+    });
+
+    const inputWrapper = row.querySelector('.ingredient-input');
+    inputWrapper.appendChild(dropdown);
+}
+
+// Hide ingredient autocomplete
+function hideIngredientAutocomplete(row) {
+    const existing = row.querySelector('.ingredient-autocomplete');
+    if (existing) existing.remove();
+}
+
+// Handle keyboard navigation in autocomplete
+function handleAutocompleteKeydown(e, row) {
+    const dropdown = row.querySelector('.ingredient-autocomplete');
+    if (!dropdown) return;
+
+    const items = dropdown.querySelectorAll('.ingredient-autocomplete-item');
+    const selected = dropdown.querySelector('.ingredient-autocomplete-item.selected');
+    let selectedIndex = selected ? parseInt(selected.dataset.index) : -1;
+
+    if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        selectedIndex = Math.min(selectedIndex + 1, items.length - 1);
+        items.forEach((item, i) => item.classList.toggle('selected', i === selectedIndex));
+    } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        selectedIndex = Math.max(selectedIndex - 1, 0);
+        items.forEach((item, i) => item.classList.toggle('selected', i === selectedIndex));
+    } else if (e.key === 'Enter' && selected) {
+        e.preventDefault();
+        e.target.value = selected.textContent;
+        hideIngredientAutocomplete(row);
+    } else if (e.key === 'Escape') {
+        hideIngredientAutocomplete(row);
+    }
+}
+
+// Add a new instruction step
+function addInstructionStep() {
+    if (!formInstructionsList) {
+        console.error('formInstructionsList not initialized');
+        return;
+    }
+    instructionStepCount++;
+    const stepNumber = formInstructionsList.children.length + 1;
+
+    const step = document.createElement('div');
+    step.className = 'instruction-step';
+    step.dataset.id = instructionStepCount;
+
+    step.innerHTML = `
+        <div class="step-number">${stepNumber}</div>
+        <div class="step-content">
+            <textarea placeholder="Describe this step..." rows="2"></textarea>
+            <button type="button" class="btn-remove-row" title="Remove step">&times;</button>
+        </div>
+    `;
+
+    const removeBtn = step.querySelector('.btn-remove-row');
+    removeBtn.addEventListener('click', () => removeInstructionStep(step));
+
+    formInstructionsList.appendChild(step);
+    updateEmptyState();
+}
+
+// Remove an instruction step
+function removeInstructionStep(step) {
+    step.style.animation = 'stepSlideIn 0.2s var(--ease-out) reverse';
+    setTimeout(() => {
+        step.remove();
+        renumberInstructionSteps();
+        updateEmptyState();
+    }, 200);
+}
+
+// Renumber instruction steps after removal
+function renumberInstructionSteps() {
+    if (!formInstructionsList) return;
+    const steps = formInstructionsList.querySelectorAll('.instruction-step');
+    steps.forEach((step, index) => {
+        step.querySelector('.step-number').textContent = index + 1;
+    });
+}
+
+// Update empty state messages
+function updateEmptyState() {
+    if (!formIngredientsList || !formInstructionsList) return;
+
+    // Check ingredients
+    if (formIngredientsList.children.length === 0) {
+        const emptyMsg = document.createElement('div');
+        emptyMsg.className = 'empty-list-message';
+        emptyMsg.innerHTML = '<span>🥗</span>Click "+ Add Ingredient" to start adding ingredients';
+        formIngredientsList.appendChild(emptyMsg);
+    } else {
+        const emptyMsg = formIngredientsList.querySelector('.empty-list-message');
+        if (emptyMsg) emptyMsg.remove();
+    }
+
+    // Check instructions
+    if (formInstructionsList.children.length === 0) {
+        const emptyMsg = document.createElement('div');
+        emptyMsg.className = 'empty-list-message';
+        emptyMsg.innerHTML = '<span>📝</span>Click "+ Add Step" to start adding instructions';
+        formInstructionsList.appendChild(emptyMsg);
+    } else {
+        const emptyMsg = formInstructionsList.querySelector('.empty-list-message');
+        if (emptyMsg) emptyMsg.remove();
+    }
+}
+
+// Get ingredients from the dynamic form
+function getIngredientsFromForm() {
+    const ingredients = [];
+    if (!formIngredientsList) return ingredients;
+    const rows = formIngredientsList.querySelectorAll('.ingredient-row');
+
+    rows.forEach(row => {
+        const qty = row.querySelector('.quantity-input').value.trim();
+        const unit = row.querySelector('.unit-select').value;
+        const name = row.querySelector('.ingredient-name').value.trim();
+
+        if (name) {
+            let ingredientText = '';
+            if (qty) ingredientText += qty + ' ';
+            if (unit) ingredientText += unit + ' ';
+            ingredientText += name;
+            ingredients.push(ingredientText.trim());
+        }
+    });
+
+    return ingredients;
+}
+
+// Get instructions from the dynamic form
+function getInstructionsFromForm() {
+    const instructions = [];
+    if (!formInstructionsList) return instructions;
+    const steps = formInstructionsList.querySelectorAll('.instruction-step');
+
+    steps.forEach(step => {
+        const text = step.querySelector('textarea').value.trim();
+        if (text) {
+            instructions.push(text);
+        }
+    });
+
+    return instructions;
+}
+
+// Reset the add recipe form
+function resetAddRecipeForm() {
+    addRecipeForm.reset();
+
+    // Clear image preview
+    clearImagePreview();
+
+    // Ensure form is initialized
+    if (!formIngredientsList || !formInstructionsList) {
+        initAddRecipeForm();
+        return;
+    }
+
+    // Clear dynamic lists
+    formIngredientsList.innerHTML = '';
+    formInstructionsList.innerHTML = '';
+    ingredientRowCount = 0;
+    instructionStepCount = 0;
+
+    // Add initial rows
+    addIngredientRow();
+    addIngredientRow();
+    addIngredientRow();
+    addInstructionStep();
+
+    hideAllConditionalFields();
+}
+
 // Add new recipe
 async function addNewRecipe() {
     if (!isAuthenticated) {
@@ -2877,20 +3411,25 @@ async function addNewRecipe() {
 
     const name = document.getElementById('recipeName').value;
     const author = document.getElementById('recipeAuthor').value;
-    const imageUrl = document.getElementById('recipeImageUrl').value;
-    const sourceType = document.getElementById('recipeSource').value;
-    const ingredientsText = document.getElementById('recipeIngredients').value;
-    const instructionsText = document.getElementById('recipeInstructions').value;
+    const sourceType = document.getElementById('recipeSourceSelect').value;
 
-    const ingredients = ingredientsText
-        .split('\n')
-        .map(i => i.trim())
-        .filter(i => i.length > 0);
+    const ingredients = getIngredientsFromForm();
+    const instructions = getInstructionsFromForm();
 
-    const instructions = instructionsText
-        .split('\n')
-        .map(i => i.trim())
-        .filter(i => i.length > 0);
+    if (ingredients.length === 0) {
+        alert('Please add at least one ingredient');
+        return;
+    }
+
+    if (instructions.length === 0) {
+        alert('Please add at least one instruction step');
+        return;
+    }
+
+    if (!sourceType) {
+        alert('Please select a recipe source');
+        return;
+    }
 
     // Build source object based on type
     let source = { type: sourceType };
@@ -2901,10 +3440,26 @@ async function addNewRecipe() {
         source.amazonLink = document.getElementById('amazonLink').value;
     }
 
+    // Upload image if selected
+    let imageUrl = null;
+    if (selectedImageFile) {
+        try {
+            imageUrl = await uploadRecipeImage(selectedImageFile);
+            if (!imageUrl) {
+                alert('Failed to upload image. Please try again.');
+                return;
+            }
+        } catch (error) {
+            console.error('Image upload failed:', error);
+            alert('Failed to upload image. Please try again.');
+            return;
+        }
+    }
+
     const recipeData = {
         name: name,
         author: author,
-        image: imageUrl || null,
+        image: imageUrl,
         source: source,
         ingredients: ingredients,
         instructions: instructions
@@ -2936,7 +3491,7 @@ async function addNewRecipe() {
             showRecipe(data.recipe.id);
 
             addRecipeModal.classList.add('hidden');
-            addRecipeForm.reset();
+            resetAddRecipeForm();
             hideAllConditionalFields();
         } else {
             alert(data.error || 'Failed to add recipe');

@@ -431,6 +431,7 @@ function showRecipeById(recipeId, pushState = true) {
     document.getElementById('recipeAuthor').textContent = recipe.author;
 
     // Display source information
+    // Display source information
     const recipeSourceElement = document.getElementById('recipeSource');
     if (recipe.source) {
         if (recipe.source.type === 'youtube') {
@@ -686,6 +687,14 @@ async function addToHistory(recipe) {
             },
             body: JSON.stringify({ recipeId: recipe.id })
         });
+
+        // Refresh folders to update counts
+        await loadFolders();
+
+        // If currently viewing History, refresh the list
+        if (currentFolderId === historyFolder.id) {
+            await showFolder(historyFolder.id, 'History');
+        }
     } catch (error) {
         console.error('Error adding to history:', error);
     }
@@ -1640,12 +1649,40 @@ function renderFolderList() {
 
             recipes.forEach(recipe => {
                 const li = document.createElement('li');
-                li.textContent = recipe.name;
+
+                // Create content wrapper
+                const contentSpan = document.createElement('span');
+                contentSpan.textContent = recipe.name;
+                contentSpan.className = 'recipe-list-name';
+
+                li.appendChild(contentSpan);
                 li.dataset.id = recipe.id;
+
                 if (recipe.id === currentRecipeId) {
                     li.classList.add('active');
                 }
-                li.addEventListener('click', () => showRecipe(recipe.id));
+
+                // Add remove button
+                const removeBtn = document.createElement('span');
+                removeBtn.className = 'remove-from-folder-btn';
+                removeBtn.innerHTML = '&times;';
+                removeBtn.title = 'Remove from folder';
+                removeBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    if (confirm(`Remove "${recipe.name}" from ${folder.name}?`)) {
+                        removeFromFolder(folder.id, recipe.id);
+                    }
+                });
+
+                li.appendChild(removeBtn);
+
+                li.addEventListener('click', (e) => {
+                    // Don't trigger if clicking remove button
+                    if (e.target !== removeBtn) {
+                        showRecipe(recipe.id);
+                    }
+                });
+
                 ul.appendChild(li);
             });
 
@@ -2002,22 +2039,25 @@ function setupEventListeners() {
             showLoginModal();
             return;
         }
+        resetRecipeModal();
         addRecipeModal.classList.remove('hidden');
     });
+
+    // Dynamic Row Buttons
+    document.getElementById('addIngredientBtn').addEventListener('click', () => addIngredientRow());
+    document.getElementById('addInstructionBtn').addEventListener('click', () => addInstructionRow());
 
     resetBtn.addEventListener('click', resetRecipe);
 
     cancelBtn.addEventListener('click', () => {
         addRecipeModal.classList.add('hidden');
-        addRecipeForm.reset();
-        hideAllConditionalFields();
+        resetRecipeModal();
     });
 
     addRecipeModal.addEventListener('click', (e) => {
         if (e.target === addRecipeModal) {
             addRecipeModal.classList.add('hidden');
-            addRecipeForm.reset();
-            hideAllConditionalFields();
+            resetRecipeModal();
         }
     });
 
@@ -2156,6 +2196,109 @@ function hideAllConditionalFields() {
 }
 
 // Add new recipe
+// Common ingredients for auto-fill
+const commonIngredients = [
+    "Salt", "Pepper", "Olive Oil", "Butter", "Sugar", "Flour", "Eggs", "Milk", "Garlic", "Onion",
+    "Tomato", "Chicken", "Beef", "Pork", "Rice", "Pasta", "Cheese", "Lemon", "Lime", "Cilantro",
+    "Parsley", "Basil", "Oregano", "Thyme", "Rosemary", "Ginger", "Soy Sauce", "Vinegar", "Honey",
+    "Baking Powder", "Baking Soda", "Vanilla Extract", "Cinammon", "Nutmeg", "Cumin", "Paprika"
+];
+
+function populateCommonIngredients() {
+    const dataList = document.getElementById('commonIngredientList');
+    dataList.innerHTML = '';
+    commonIngredients.sort().forEach(ing => {
+        const option = document.createElement('option');
+        option.value = ing;
+        dataList.appendChild(option);
+    });
+}
+
+function addIngredientRow(quantity = '', unit = '', name = '') {
+    const container = document.getElementById('ingredientsListContainer');
+    const row = document.createElement('div');
+    row.className = 'ingredient-row';
+
+    row.innerHTML = `
+        <input type="text" class="qty-input" placeholder="Qty" value="${quantity}">
+        <input type="text" class="unit-input" placeholder="Unit" value="${unit}" list="unitsList">
+        <input type="text" class="name-input" placeholder="Ingredient" value="${name}" list="commonIngredientList" required>
+        <button type="button" class="remove-row-btn" title="Remove ingredient">&times;</button>
+    `;
+
+    // Add units datalist if not exists
+    if (!document.getElementById('unitsList')) {
+        const unitsList = document.createElement('datalist');
+        unitsList.id = 'unitsList';
+        const units = ["tsp", "tbsp", "cup", "oz", "lb", "g", "kg", "ml", "l", "pinch", "clove", "slice"];
+        units.forEach(u => {
+            const option = document.createElement('option');
+            option.value = u;
+            unitsList.appendChild(option);
+        });
+        document.body.appendChild(unitsList);
+    }
+
+    const removeBtn = row.querySelector('.remove-row-btn');
+    removeBtn.addEventListener('click', () => {
+        if (container.children.length > 1) {
+            container.removeChild(row);
+        } else {
+            // If it's the last row, just clear values
+            row.querySelectorAll('input').forEach(input => input.value = '');
+        }
+    });
+
+    container.appendChild(row);
+}
+
+function addInstructionRow(text = '') {
+    const container = document.getElementById('instructionsListContainer');
+    const row = document.createElement('div');
+    row.className = 'instruction-row';
+
+    row.innerHTML = `
+        <span class="step-number">${container.children.length + 1}.</span>
+        <textarea class="instruction-input" rows="2" placeholder="Describe this step..." required>${text}</textarea>
+        <button type="button" class="remove-row-btn" title="Remove step">&times;</button>
+    `;
+
+    const removeBtn = row.querySelector('.remove-row-btn');
+    removeBtn.addEventListener('click', () => {
+        if (container.children.length > 1) {
+            container.removeChild(row);
+            updateStepNumbers();
+        } else {
+            row.querySelector('textarea').value = '';
+        }
+    });
+
+    container.appendChild(row);
+}
+
+function updateStepNumbers() {
+    const container = document.getElementById('instructionsListContainer');
+    Array.from(container.children).forEach((row, index) => {
+        const stepNum = row.querySelector('.step-number');
+        if (stepNum) stepNum.textContent = `${index + 1}.`;
+    });
+}
+
+function resetRecipeModal() {
+    const form = document.getElementById('addRecipeForm');
+    form.reset();
+    hideAllConditionalFields();
+
+    document.getElementById('ingredientsListContainer').innerHTML = '';
+    document.getElementById('instructionsListContainer').innerHTML = '';
+
+    addIngredientRow();
+    addInstructionRow();
+
+    populateCommonIngredients();
+}
+
+// Add new recipe
 async function addNewRecipe() {
     if (!isAuthenticated) {
         alert('Please login to add recipes');
@@ -2166,18 +2309,45 @@ async function addNewRecipe() {
     const author = document.getElementById('recipeAuthor').value;
     const imageUrl = document.getElementById('recipeImageUrl').value;
     const sourceType = document.getElementById('recipeSource').value;
-    const ingredientsText = document.getElementById('recipeIngredients').value;
-    const instructionsText = document.getElementById('recipeInstructions').value;
 
-    const ingredients = ingredientsText
-        .split('\n')
-        .map(i => i.trim())
-        .filter(i => i.length > 0);
+    // Gather ingredients from rows
+    const ingredientRows = document.querySelectorAll('.ingredient-row');
+    const ingredients = Array.from(ingredientRows).map(row => {
+        const qty = row.querySelector('.qty-input').value.trim();
+        const unit = row.querySelector('.unit-input').value.trim();
+        const ingName = row.querySelector('.name-input').value.trim();
 
-    const instructions = instructionsText
-        .split('\n')
-        .map(i => i.trim())
-        .filter(i => i.length > 0);
+        if (!ingName) return null;
+
+        let fullIngredient = ingName;
+        if (qty) fullIngredient = `${qty} ${unit} ${fullIngredient}`.replace(/\s+/g, ' ').trim();
+        else if (unit) fullIngredient = `${unit} ${fullIngredient}`.replace(/\s+/g, ' ').trim();
+
+        return fullIngredient;
+    }).filter(i => i !== null);
+
+    // Gather instructions from rows
+    const instructionRows = document.querySelectorAll('.instruction-row');
+    const instructions = Array.from(instructionRows).map(row => {
+        return row.querySelector('.instruction-input').value.trim();
+    }).filter(i => i.length > 0);
+
+    if (ingredients.length === 0) {
+        alert('Please add at least one ingredient');
+        return;
+    }
+
+    if (instructions.length === 0) {
+        alert('Please add at least one instruction step');
+        return;
+    }
+
+
+
+    if (!sourceType) {
+        alert('Please select a source type');
+        return;
+    }
 
     // Build source object based on type
     let source = { type: sourceType };
@@ -2223,8 +2393,7 @@ async function addNewRecipe() {
             showRecipe(data.recipe.id);
 
             addRecipeModal.classList.add('hidden');
-            addRecipeForm.reset();
-            hideAllConditionalFields();
+            resetRecipeModal();
         } else {
             alert(data.error || 'Failed to add recipe');
         }

@@ -458,16 +458,25 @@ app.post('/api/recipes', requireAuth, async (req, res) => {
         const { name, author, image, source, ingredients, instructions } = req.body;
         const userId = req.userId;
 
+        // Validate required fields
+        if (!name || !ingredients || !instructions) {
+            return res.status(400).json({ error: 'Missing required fields: name, ingredients, or instructions' });
+        }
+
+        if (!source || !source.type) {
+            return res.status(400).json({ error: 'Missing source type' });
+        }
+
         const recipeData = {
             user_id: userId,
             name,
-            author,
+            author: author || '',
             image: image || null,
             source_type: source.type,
             source_data: source,
-            ingredients,
-            instructions,
-            created_at: null
+            ingredients: Array.isArray(ingredients) ? ingredients : [],
+            instructions: Array.isArray(instructions) ? instructions : [],
+            created_at: admin.firestore.FieldValue.serverTimestamp()
         };
 
         const recipeRef = await db.collection('recipes').add(recipeData);
@@ -476,12 +485,13 @@ app.post('/api/recipes', requireAuth, async (req, res) => {
             success: true,
             recipe: {
                 id: recipeRef.id,
-                ...recipeData
+                ...recipeData,
+                created_at: new Date().toISOString()
             }
         });
     } catch (error) {
-        console.error('Error saving recipe:', error);
-        res.status(500).json({ error: 'Error saving recipe' });
+        console.error('Error saving recipe:', error.message, error.stack);
+        res.status(500).json({ error: 'Error saving recipe: ' + error.message });
     }
 });
 

@@ -65,7 +65,7 @@
                     <div class="recipe-title-section">
                         <h1 id="recipeTitle"></h1>
                         <p class="recipe-author" id="recipeAuthor"></p>
-                        <p class="recipe-source" id="recipeSource"></p>
+                        <p class="recipe-source" id="recipeSourceDisplay"></p>
                         <div class="recipe-rating-display" id="recipeRatingDisplay">
                             <div class="stars" id="recipeStars"></div>
                             <span class="rating-text" id="ratingText"></span>
@@ -151,11 +151,17 @@
                     <input type="url" id="amazonLink" placeholder="https://www.amazon.com/...">
                 </div>
 
-                <label for="recipeIngredients">Ingredients (one per line):</label>
-                <textarea id="recipeIngredients" rows="8" required></textarea>
+                <label>Ingredients:</label>
+                <div id="ingredientsListContainer" class="dynamic-list-container"></div>
+                <button type="button" id="addIngredientBtn" class="btn-secondary btn-small">+ Add Ingredient</button>
 
-                <label for="recipeInstructions">Instructions (one per line):</label>
-                <textarea id="recipeInstructions" rows="8" required></textarea>
+                <label>Instructions:</label>
+                <div id="instructionsListContainer" class="dynamic-list-container"></div>
+                <button type="button" id="addInstructionBtn" class="btn-secondary btn-small">+ Add Step</button>
+
+                <datalist id="commonIngredientList">
+                    <!-- Populated by JS -->
+                </datalist>
 
                 <div class="modal-buttons">
                     <button type="submit" class="btn-primary">Add Recipe</button>

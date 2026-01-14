@@ -170,6 +170,10 @@ body {
     font-weight: 500;
     color: #2c3e50;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
 }
 
 .recipe-list li:hover {
@@ -179,11 +183,44 @@ body {
     box-shadow: 0 2px 8px rgba(91, 141, 239, 0.15);
 }
 
+.recipe-list-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.remove-from-folder-btn {
+    display: none;
+    color: #e74c3c;
+    font-weight: bold;
+    font-size: 18px;
+    padding: 0 4px;
+    border-radius: 4px;
+    line-height: 1;
+}
+
+.remove-from-folder-btn:hover {
+    background-color: rgba(231, 76, 60, 0.1);
+}
+
+.recipe-list li:hover .remove-from-folder-btn {
+    display: block;
+}
+
 .recipe-list li.active {
     background: linear-gradient(135deg, #5b8def 0%, #4a7fd4 100%);
     color: white;
     border-color: #5b8def;
     box-shadow: 0 3px 10px rgba(91, 141, 239, 0.3);
+}
+
+.recipe-list li.active .remove-from-folder-btn {
+    color: #ffdce0;
+}
+
+.recipe-list li.active .remove-from-folder-btn:hover {
+    background-color: rgba(255, 255, 255, 0.2);
 }
 
 /* Folder Styles */
@@ -1557,6 +1594,7 @@ body {
         opacity: 0;
         transform: translateX(-50%) translateY(-20px);
     }
+
     to {
         opacity: 1;
         transform: translateX(-50%) translateY(0);
@@ -1653,4 +1691,77 @@ body {
     color: #999;
     font-style: italic;
     padding: 40px 20px;
+}
+
+/* Dynamic Input Rows Styles */
+.dynamic-list-container {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 12px;
+}
+
+.ingredient-row,
+.instruction-row {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+
+.ingredient-row input,
+.instruction-row textarea {
+    margin-bottom: 0 !important;
+    /* Override default input margin */
+}
+
+.qty-input {
+    width: 70px;
+    flex-shrink: 0;
+}
+
+.unit-input {
+    width: 100px;
+    flex-shrink: 0;
+}
+
+.name-input {
+    flex-grow: 1;
+}
+
+.instruction-input {
+    flex-grow: 1;
+    resize: vertical;
+    min-height: 38px;
+    font-family: inherit;
+}
+
+.remove-row-btn {
+    background: none;
+    border: none;
+    color: #e74c3c;
+    font-size: 20px;
+    cursor: pointer;
+    padding: 5px;
+    line-height: 1;
+    transition: color 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.remove-row-btn:hover {
+    color: #c0392b;
+}
+
+.btn-small {
+    padding: 6px 12px;
+    font-size: 13px;
+    margin-bottom: 15px;
+    display: inline-block;
+}
+
+/* Ensure modal content scrolling */
+.modal-content {
+    max-height: 90vh;
+    overflow-y: auto;
 }
