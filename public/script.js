@@ -180,6 +180,8 @@ const usernameDisplay = document.getElementById('usernameDisplay');
 const loginError = document.getElementById('loginError');
 const signupError = document.getElementById('signupError');
 const siteLogo = document.getElementById('siteLogo');
+const googleLoginBtn = document.getElementById('googleLoginBtn');
+const googleSignupBtn = document.getElementById('googleSignupBtn');
 
 // Rating DOM elements
 const ratingModal = document.getElementById('ratingModal');
@@ -1840,6 +1842,68 @@ async function handleSignup(e) {
     }
 }
 
+async function handleGoogleSignIn() {
+    // Clear any previous errors
+    loginError.textContent = '';
+    signupError.textContent = '';
+
+    try {
+        const provider = new firebase.auth.GoogleAuthProvider();
+        const result = await auth.signInWithPopup(provider);
+        const user = result.user;
+
+        // Close modals
+        loginModal.classList.add('hidden');
+        signupModal.classList.add('hidden');
+        loginForm.reset();
+        signupForm.reset();
+
+        // Create/update user document via repair endpoint
+        // This handles both new and existing users
+        const repairResponse = await apiFetch('/api/user/repair', { method: 'POST' });
+        if (repairResponse.ok) {
+            const data = await repairResponse.json();
+            currentUser = data.user;
+            isAuthenticated = true;
+            updateAuthUI();
+            await loadFolders();
+
+            // Sync any guest history
+            await syncHistoryToBackend();
+        }
+    } catch (error) {
+        console.error('Google sign-in error:', error.code, error.message);
+
+        // Map error codes to user-friendly messages
+        let errorMessage;
+        switch (error.code) {
+            case 'auth/popup-closed-by-user':
+                errorMessage = 'Sign-in cancelled';
+                break;
+            case 'auth/popup-blocked':
+                errorMessage = 'Popup was blocked. Please allow popups for this site.';
+                break;
+            case 'auth/cancelled-popup-request':
+                errorMessage = 'Sign-in cancelled';
+                break;
+            case 'auth/unauthorized-domain':
+                errorMessage = 'This domain is not authorized for Google sign-in.';
+                break;
+            case 'auth/operation-not-allowed':
+                errorMessage = 'Google sign-in is not enabled. Please contact support.';
+                break;
+            default:
+                errorMessage = `Sign-in failed: ${error.message || error.code || 'Unknown error'}`;
+        }
+
+        if (!loginModal.classList.contains('hidden')) {
+            loginError.textContent = errorMessage;
+        } else if (!signupModal.classList.contains('hidden')) {
+            signupError.textContent = errorMessage;
+        }
+    }
+}
+
 async function handleLogout() {
     try {
         // Sign out from Firebase Auth
@@ -2690,6 +2754,8 @@ function setupEventListeners() {
     logoutBtn.addEventListener('click', handleLogout);
     loginForm.addEventListener('submit', handleLogin);
     signupForm.addEventListener('submit', handleSignup);
+    googleLoginBtn.addEventListener('click', handleGoogleSignIn);
+    googleSignupBtn.addEventListener('click', handleGoogleSignIn);
 
     cancelLoginBtn.addEventListener('click', () => {
         loginModal.classList.add('hidden');
