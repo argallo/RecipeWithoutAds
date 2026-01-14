@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Recipe Collection</title>
     <base href="/">
-    <link rel="stylesheet" href="/styles.css?v=22">
+    <link rel="stylesheet" href="/styles.css?v=24">
 </head>
 
 <body>
@@ -36,6 +36,7 @@
                 <button class="login-btn" id="loginBtn">Login</button>
                 <div class="user-dropdown hidden" id="userDropdown">
                     <button class="username-display" id="usernameDisplay"></button>
+                    <a href="/admin" class="admin-link hidden" id="adminLink">Admin Dashboard</a>
                     <button class="logout-btn" id="logoutBtn">Logout</button>
                 </div>
             </div>
@@ -181,7 +182,86 @@
                     </section>
                 </div>
             </div>
+
+            <!-- Admin Dashboard Page -->
+            <div id="adminPage" class="admin-page hidden">
+                <div class="admin-container">
+                    <div class="admin-header">
+                        <h1>Admin Dashboard</h1>
+                        <p class="admin-subtitle">Manage all recipes on the platform</p>
+                    </div>
+
+                    <div class="admin-stats-grid">
+                        <div class="admin-stat-card">
+                            <span class="stat-icon">📖</span>
+                            <div class="stat-info">
+                                <span class="stat-number" id="adminTotalRecipes">0</span>
+                                <span class="stat-label">Total Recipes</span>
+                            </div>
+                        </div>
+                        <div class="admin-stat-card">
+                            <span class="stat-icon">👥</span>
+                            <div class="stat-info">
+                                <span class="stat-number" id="adminTotalUsers">0</span>
+                                <span class="stat-label">Total Users</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="admin-recipes-section">
+                        <div class="admin-toolbar">
+                            <div class="admin-search">
+                                <input type="text" id="adminSearchInput" placeholder="Search recipes, users...">
+                                <button type="button" id="adminSearchBtn" class="btn-icon">🔍</button>
+                            </div>
+                            <div class="admin-pagination-info">
+                                <span id="adminPaginationInfo">Showing 0 recipes</span>
+                            </div>
+                        </div>
+
+                        <div class="admin-recipes-table-wrapper">
+                            <table class="admin-recipes-table">
+                                <thead>
+                                    <tr>
+                                        <th>Image</th>
+                                        <th>Recipe Name</th>
+                                        <th>Author</th>
+                                        <th>Created By</th>
+                                        <th>Date</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="adminRecipesTableBody">
+                                    <!-- Recipes will be loaded here -->
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <div class="admin-pagination">
+                            <button type="button" id="adminPrevPage" class="btn-secondary" disabled>Previous</button>
+                            <span id="adminPageInfo">Page 1 of 1</span>
+                            <button type="button" id="adminNextPage" class="btn-secondary" disabled>Next</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </main>
+    </div>
+
+    <!-- Admin Delete Confirmation Modal -->
+    <div id="adminDeleteModal" class="modal hidden">
+        <div class="modal-content admin-delete-modal">
+            <h2>Delete Recipe</h2>
+            <p class="delete-warning">Are you sure you want to delete this recipe? This action cannot be undone.</p>
+            <div class="delete-recipe-info">
+                <strong id="deleteRecipeName"></strong>
+                <span id="deleteRecipeAuthor"></span>
+            </div>
+            <div class="modal-buttons">
+                <button type="button" class="btn-danger" id="confirmDeleteBtn">Delete Recipe</button>
+                <button type="button" class="btn-secondary" id="cancelDeleteBtn">Cancel</button>
+            </div>
+        </div>
     </div>
 
     <!-- Rating Modal -->
@@ -216,8 +296,8 @@
                             <input type="text" id="recipeName" placeholder="e.g., Grandma's Apple Pie" required>
                         </div>
                         <div class="form-field">
-                            <label for="recipeAuthor">Author</label>
-                            <input type="text" id="recipeAuthor" placeholder="Who created this recipe?" required>
+                            <label for="recipeAuthorInput">Author</label>
+                            <input type="text" id="recipeAuthorInput" placeholder="Who created this recipe?" required>
                         </div>
                     </div>
 
@@ -474,7 +554,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-storage-compat.js"></script>
     <script src="/__/firebase/init.js"></script>
-    <script src="/script.js?v=24"></script>
+    <script src="/script.js?v=29"></script>
 </body>
 
 </html>

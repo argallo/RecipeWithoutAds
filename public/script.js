@@ -177,6 +177,7 @@ const showSignupBtn = document.getElementById('showSignupBtn');
 const showLoginBtn = document.getElementById('showLoginBtn');
 const userDropdown = document.getElementById('userDropdown');
 const usernameDisplay = document.getElementById('usernameDisplay');
+const adminLink = document.getElementById('adminLink');
 const loginError = document.getElementById('loginError');
 const signupError = document.getElementById('signupError');
 const siteLogo = document.getElementById('siteLogo');
@@ -240,10 +241,34 @@ const totalCookedEl = document.getElementById('totalCooked');
 const currentStreakEl = document.getElementById('currentStreak');
 const longestStreakEl = document.getElementById('longestStreak');
 
+// Admin Dashboard DOM elements
+const adminPage = document.getElementById('adminPage');
+const adminTotalRecipes = document.getElementById('adminTotalRecipes');
+const adminTotalUsers = document.getElementById('adminTotalUsers');
+const adminSearchInput = document.getElementById('adminSearchInput');
+const adminSearchBtn = document.getElementById('adminSearchBtn');
+const adminRecipesTableBody = document.getElementById('adminRecipesTableBody');
+const adminPaginationInfo = document.getElementById('adminPaginationInfo');
+const adminPrevPage = document.getElementById('adminPrevPage');
+const adminNextPage = document.getElementById('adminNextPage');
+const adminPageInfo = document.getElementById('adminPageInfo');
+const adminDeleteModal = document.getElementById('adminDeleteModal');
+const deleteRecipeName = document.getElementById('deleteRecipeName');
+const deleteRecipeAuthor = document.getElementById('deleteRecipeAuthor');
+const confirmDeleteBtn = document.getElementById('confirmDeleteBtn');
+const cancelDeleteBtn = document.getElementById('cancelDeleteBtn');
+
 // Authentication state
 let currentUser = null;
 let isAuthenticated = false;
 let isSigningUp = false; // Flag to prevent race condition during signup
+
+// Admin dashboard state
+let adminRecipes = [];
+let adminCurrentPage = 1;
+let adminTotalPages = 1;
+let adminSearchQuery = '';
+let adminRecipeToDelete = null;
 
 // Firebase Auth reference
 const auth = firebase.auth();
@@ -305,6 +330,14 @@ function isCacheValid(key) {
     const cached = getCachedData(key);
     if (!cached) return false;
     return (Date.now() - cached.timestamp) < CACHE_DURATION;
+}
+
+// Utility function to escape HTML to prevent XSS
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
 }
 
 function clearCache() {
@@ -535,6 +568,13 @@ async function handleRoute(path) {
         } else {
             navigateTo('/home', {}, true);
         }
+    } else if (pathParts[0] === 'admin') {
+        // Admin dashboard - check if user is admin
+        if (isAuthenticated && currentUser && currentUser.isAdmin) {
+            showAdminPage();
+        } else {
+            navigateTo('/home', {}, true);
+        }
     } else if (pathParts[0] === 'recipe') {
         // Recipe page - extract ID from slug
         const recipeId = extractRecipeId(path);
@@ -555,6 +595,7 @@ function showHomePage() {
     // Hide other views and show landing page
     recipeDisplay.classList.add('hidden');
     userSettingsPage.classList.add('hidden');
+    adminPage.classList.add('hidden');
     landingPage.style.display = 'block';
 
     // Clear current recipe
@@ -1741,9 +1782,16 @@ function updateAuthUI() {
         loginBtn.classList.add('hidden');
         userDropdown.classList.remove('hidden');
         usernameDisplay.textContent = currentUser.username;
+        // Show admin link if user is admin
+        if (currentUser.isAdmin) {
+            adminLink.classList.remove('hidden');
+        } else {
+            adminLink.classList.add('hidden');
+        }
     } else {
         loginBtn.classList.remove('hidden');
         userDropdown.classList.add('hidden');
+        adminLink.classList.add('hidden');
     }
 }
 
@@ -2071,6 +2119,216 @@ async function handleChangePassword(e) {
     }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Admin Dashboard Functions
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function showAdminPage() {
+    if (!isAuthenticated || !currentUser || !currentUser.isAdmin) {
+        navigateTo('/home', {}, true);
+        return;
+    }
+
+    // Hide other views
+    recipeDisplay.classList.add('hidden');
+    userSettingsPage.classList.add('hidden');
+    landingPage.style.display = 'none';
+
+    // Show admin page
+    adminPage.classList.remove('hidden');
+
+    // Load admin stats and recipes
+    await loadAdminStats();
+    await loadAdminRecipes();
+}
+
+async function loadAdminStats() {
+    try {
+        const response = await apiFetch('/api/admin/stats');
+        if (response.ok) {
+            const data = await response.json();
+            adminTotalRecipes.textContent = data.totalRecipes;
+            adminTotalUsers.textContent = data.totalUsers;
+        }
+    } catch (error) {
+        console.error('Error loading admin stats:', error);
+    }
+}
+
+async function loadAdminRecipes(page = 1, search = '') {
+    try {
+        adminCurrentPage = page;
+        adminSearchQuery = search;
+
+        const params = new URLSearchParams({
+            page: page.toString(),
+            limit: '20'
+        });
+        if (search) {
+            params.append('search', search);
+        }
+
+        const response = await apiFetch(`/api/admin/recipes?${params}`);
+        if (response.ok) {
+            const data = await response.json();
+            adminRecipes = data.recipes;
+            adminTotalPages = data.totalPages;
+
+            renderAdminRecipes();
+            updateAdminPagination(data.total, data.page, data.totalPages);
+        }
+    } catch (error) {
+        console.error('Error loading admin recipes:', error);
+    }
+}
+
+function renderAdminRecipes() {
+    adminRecipesTableBody.innerHTML = '';
+
+    if (adminRecipes.length === 0) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = '<td colspan="6" class="admin-empty-message">No recipes found</td>';
+        adminRecipesTableBody.appendChild(tr);
+        return;
+    }
+
+    adminRecipes.forEach(recipe => {
+        const tr = document.createElement('tr');
+        const createdDate = recipe.createdAt ?
+            new Date(recipe.createdAt._seconds * 1000).toLocaleDateString() :
+            'N/A';
+
+        tr.innerHTML = `
+            <td>
+                <div class="admin-recipe-image">
+                    ${recipe.image ? `<img src="${recipe.image}" alt="${recipe.name}">` : '<span class="no-image">No image</span>'}
+                </div>
+            </td>
+            <td>
+                <a href="/recipe/${generateSlug(recipe.name)}-${recipe.id}" class="admin-recipe-name">${escapeHtml(recipe.name)}</a>
+            </td>
+            <td>${escapeHtml(recipe.author || 'Unknown')}</td>
+            <td>
+                <span class="admin-user-badge">${escapeHtml(recipe.createdByUsername || 'Unknown')}</span>
+            </td>
+            <td>${createdDate}</td>
+            <td>
+                <button class="admin-delete-btn" data-recipe-id="${recipe.id}" data-recipe-name="${escapeHtml(recipe.name)}" data-recipe-author="${escapeHtml(recipe.author || 'Unknown')}">Delete</button>
+            </td>
+        `;
+        adminRecipesTableBody.appendChild(tr);
+    });
+
+    // Add event listeners to delete buttons
+    adminRecipesTableBody.querySelectorAll('.admin-delete-btn').forEach(btn => {
+        btn.addEventListener('click', () => showDeleteConfirmation(
+            btn.dataset.recipeId,
+            btn.dataset.recipeName,
+            btn.dataset.recipeAuthor
+        ));
+    });
+}
+
+function updateAdminPagination(total, page, totalPages) {
+    adminPaginationInfo.textContent = `Showing ${adminRecipes.length} of ${total} recipes`;
+    adminPageInfo.textContent = `Page ${page} of ${totalPages}`;
+
+    adminPrevPage.disabled = page <= 1;
+    adminNextPage.disabled = page >= totalPages;
+}
+
+function showDeleteConfirmation(recipeId, recipeName, recipeAuthor) {
+    adminRecipeToDelete = recipeId;
+    deleteRecipeName.textContent = recipeName;
+    deleteRecipeAuthor.textContent = `by ${recipeAuthor}`;
+    adminDeleteModal.classList.remove('hidden');
+}
+
+function hideDeleteConfirmation() {
+    adminDeleteModal.classList.add('hidden');
+    adminRecipeToDelete = null;
+}
+
+async function deleteAdminRecipe() {
+    if (!adminRecipeToDelete) return;
+
+    try {
+        confirmDeleteBtn.disabled = true;
+        confirmDeleteBtn.textContent = 'Deleting...';
+
+        const response = await apiFetch(`/api/admin/recipes/${adminRecipeToDelete}`, {
+            method: 'DELETE'
+        });
+
+        if (response.ok) {
+            hideDeleteConfirmation();
+            // Clear all caches so deleted recipe doesn't appear in history/folders
+            clearCache();
+            // Reload the current page of recipes
+            await loadAdminRecipes(adminCurrentPage, adminSearchQuery);
+            // Update stats
+            await loadAdminStats();
+        } else {
+            const data = await response.json();
+            alert(`Error deleting recipe: ${data.error || 'Unknown error'}`);
+        }
+    } catch (error) {
+        console.error('Error deleting recipe:', error);
+        alert('Error deleting recipe. Please try again.');
+    } finally {
+        confirmDeleteBtn.disabled = false;
+        confirmDeleteBtn.textContent = 'Delete Recipe';
+    }
+}
+
+function handleAdminSearch() {
+    const query = adminSearchInput.value.trim();
+    loadAdminRecipes(1, query);
+}
+
+function setupAdminEventListeners() {
+    // Search
+    adminSearchBtn.addEventListener('click', handleAdminSearch);
+    adminSearchInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            handleAdminSearch();
+        }
+    });
+
+    // Pagination
+    adminPrevPage.addEventListener('click', () => {
+        if (adminCurrentPage > 1) {
+            loadAdminRecipes(adminCurrentPage - 1, adminSearchQuery);
+        }
+    });
+
+    adminNextPage.addEventListener('click', () => {
+        if (adminCurrentPage < adminTotalPages) {
+            loadAdminRecipes(adminCurrentPage + 1, adminSearchQuery);
+        }
+    });
+
+    // Delete confirmation modal
+    confirmDeleteBtn.addEventListener('click', deleteAdminRecipe);
+    cancelDeleteBtn.addEventListener('click', hideDeleteConfirmation);
+
+    // Admin link click handler
+    adminLink.addEventListener('click', (e) => {
+        e.preventDefault();
+        navigateTo('/admin', {});
+    });
+
+    // Close modal when clicking outside
+    adminDeleteModal.addEventListener('click', (e) => {
+        if (e.target === adminDeleteModal) {
+            hideDeleteConfirmation();
+        }
+    });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+
 async function loadCookingActivity() {
     try {
         const response = await apiFetch('/api/cooking-activity');
@@ -2235,6 +2493,7 @@ async function init() {
     filteredRecipes = [];
     setupEventListeners();
     setupRatingEventListeners();
+    setupAdminEventListeners();
     initAddRecipeForm();
     initImageUpload();
     await checkAuthStatus();
@@ -3409,12 +3668,22 @@ async function addNewRecipe() {
         return;
     }
 
-    const name = document.getElementById('recipeName').value;
-    const author = document.getElementById('recipeAuthor').value;
+    const name = document.getElementById('recipeName').value.trim();
+    const author = document.getElementById('recipeAuthorInput').value.trim();
     const sourceType = document.getElementById('recipeSourceSelect').value;
 
     const ingredients = getIngredientsFromForm();
     const instructions = getInstructionsFromForm();
+
+    if (!name) {
+        alert('Please enter a recipe name');
+        return;
+    }
+
+    if (!author) {
+        alert('Please enter an author name');
+        return;
+    }
 
     if (ingredients.length === 0) {
         alert('Please add at least one ingredient');
@@ -3464,6 +3733,8 @@ async function addNewRecipe() {
         ingredients: ingredients,
         instructions: instructions
     };
+
+    console.log('Submitting recipe:', recipeData);
 
     try {
         const response = await apiFetch('/api/recipes', {

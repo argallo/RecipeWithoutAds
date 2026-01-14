@@ -81,6 +81,29 @@ async function requireAuth(req, res, next) {
     }
 }
 
+// Admin middleware - check if user is in admin email whitelist
+async function requireAdmin(req, res, next) {
+    const adminEmails = (process.env.ADMIN_EMAILS || '').split(',').map(e => e.trim().toLowerCase()).filter(e => e);
+
+    if (adminEmails.length === 0) {
+        return res.status(403).json({ error: 'No admin emails configured' });
+    }
+
+    const userEmail = req.user.email?.toLowerCase();
+
+    if (!userEmail || !adminEmails.includes(userEmail)) {
+        return res.status(403).json({ error: 'Admin access required' });
+    }
+
+    next();
+}
+
+// Helper to check if a user is admin
+function isUserAdmin(email) {
+    const adminEmails = (process.env.ADMIN_EMAILS || '').split(',').map(e => e.trim().toLowerCase()).filter(e => e);
+    return adminEmails.includes(email?.toLowerCase());
+}
+
 // ============================================
 // INITIALIZATION - SEED SAMPLE RECIPES
 // ============================================
@@ -388,7 +411,8 @@ app.get('/api/user', requireAuth, async (req, res) => {
             user: {
                 id: userDoc.id,
                 username: userData.username,
-                email: userData.email
+                email: userData.email,
+                isAdmin: isUserAdmin(userData.email)
             }
         });
     } catch (error) {
@@ -908,9 +932,10 @@ app.get('/api/folders/:id/recipes', requireAuth, async (req, res) => {
             });
         }
 
-        // Build recipe list
+        // Build recipe list and track orphaned entries for cleanup
         const recipes = [];
-        recipeDocs.forEach(recipeDoc => {
+        const orphanedRecipeIds = [];
+        recipeDocs.forEach((recipeDoc, index) => {
             if (recipeDoc.exists) {
                 const recipe = { id: recipeDoc.id, ...recipeDoc.data() };
                 const ratingData = ratingsMap[recipeDoc.id] || { total: 0, count: 0 };
@@ -920,8 +945,31 @@ app.get('/api/folders/:id/recipes', requireAuth, async (req, res) => {
                 recipe.ratingCount = ratingData.count;
                 recipe.folder_created_at = recipeMetadata[recipeDoc.id]?.created_at;
                 recipes.push(recipe);
+            } else {
+                // Recipe was deleted - track for cleanup
+                orphanedRecipeIds.push(recipeIds[index]);
             }
         });
+
+        // Clean up orphaned folder_recipes entries (async, don't wait)
+        if (orphanedRecipeIds.length > 0) {
+            (async () => {
+                try {
+                    const cleanupBatch = db.batch();
+                    for (const orphanId of orphanedRecipeIds) {
+                        const orphanSnapshot = await db.collection('folder_recipes')
+                            .where('folder_id', '==', folderId)
+                            .where('recipe_id', '==', orphanId)
+                            .get();
+                        orphanSnapshot.docs.forEach(doc => cleanupBatch.delete(doc.ref));
+                    }
+                    await cleanupBatch.commit();
+                    console.log(`Cleaned up ${orphanedRecipeIds.length} orphaned folder_recipes entries`);
+                } catch (e) {
+                    console.error('Error cleaning up orphaned entries:', e);
+                }
+            })();
+        }
 
         // Sort: History folder by created_at DESC, others by name ASC
         if (folderData.name === 'History') {
@@ -1682,6 +1730,190 @@ app.get('/api/cooking-activity', requireAuth, async (req, res) => {
     } catch (error) {
         console.error('Error fetching cooking activity:', error);
         res.status(500).json({ error: 'Error fetching cooking activity' });
+    }
+});
+
+// ============================================
+// ADMIN ROUTES
+// ============================================
+
+// Get all recipes (admin only) with pagination
+app.get('/api/admin/recipes', requireAuth, requireAdmin, async (req, res) => {
+    try {
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 50;
+        const search = req.query.search || '';
+
+        // Get all recipes (we'll sort and paginate in memory)
+        const snapshot = await db.collection('recipes').get();
+        let allRecipes = [];
+
+        for (const doc of snapshot.docs) {
+            const data = doc.data();
+            // Skip system recipes
+            if (data.user_id === 'system') continue;
+
+            // Get user info for each recipe
+            let username = 'Unknown';
+            let userEmail = '';
+            if (data.user_id) {
+                const userDoc = await db.collection('users').doc(data.user_id).get();
+                if (userDoc.exists) {
+                    const userData = userDoc.data();
+                    username = userData.username || 'Unknown';
+                    userEmail = userData.email || '';
+                }
+            }
+
+            allRecipes.push({
+                id: doc.id,
+                name: data.name,
+                author: data.author,
+                image: data.image,
+                source_type: data.source_type,
+                user_id: data.user_id,
+                createdByUsername: username,
+                userEmail: userEmail,
+                createdAt: data.created_at ? { _seconds: Math.floor(data.created_at.toDate().getTime() / 1000) } : null,
+                ingredientCount: data.ingredients?.length || 0,
+                instructionCount: data.instructions?.length || 0
+            });
+        }
+
+        // Sort by creation date (newest first)
+        allRecipes.sort((a, b) => {
+            const aTime = a.createdAt?._seconds || 0;
+            const bTime = b.createdAt?._seconds || 0;
+            return bTime - aTime;
+        });
+
+        // Filter by search if provided
+        if (search) {
+            const searchLower = search.toLowerCase();
+            allRecipes = allRecipes.filter(r =>
+                r.name?.toLowerCase().includes(searchLower) ||
+                r.author?.toLowerCase().includes(searchLower) ||
+                r.createdByUsername?.toLowerCase().includes(searchLower) ||
+                r.userEmail?.toLowerCase().includes(searchLower)
+            );
+        }
+
+        // Paginate
+        const total = allRecipes.length;
+        const totalPages = Math.ceil(total / limit);
+        const startIndex = (page - 1) * limit;
+        const paginatedRecipes = allRecipes.slice(startIndex, startIndex + limit);
+
+        res.json({
+            recipes: paginatedRecipes,
+            page,
+            limit,
+            total,
+            totalPages
+        });
+    } catch (error) {
+        console.error('Error fetching admin recipes:', error);
+        res.status(500).json({ error: 'Error fetching recipes' });
+    }
+});
+
+// Delete recipe (admin only) - also deletes storage image and folder references
+app.delete('/api/admin/recipes/:id', requireAuth, requireAdmin, async (req, res) => {
+    try {
+        const recipeId = req.params.id;
+
+        // Get the recipe first
+        const recipeDoc = await db.collection('recipes').doc(recipeId).get();
+
+        if (!recipeDoc.exists) {
+            return res.status(404).json({ error: 'Recipe not found' });
+        }
+
+        const recipeData = recipeDoc.data();
+
+        // Don't allow deleting system recipes
+        if (recipeData.user_id === 'system') {
+            return res.status(403).json({ error: 'Cannot delete system recipes' });
+        }
+
+        // Delete image from Firebase Storage if it exists
+        if (recipeData.image && recipeData.image.includes('firebasestorage.googleapis.com')) {
+            try {
+                // Extract the path from the URL
+                // URL format: https://firebasestorage.googleapis.com/v0/b/BUCKET/o/PATH?token=...
+                const urlParts = new URL(recipeData.image);
+                const pathMatch = urlParts.pathname.match(/\/o\/(.+)$/);
+                if (pathMatch) {
+                    const filePath = decodeURIComponent(pathMatch[1]);
+                    const bucket = admin.storage().bucket();
+                    await bucket.file(filePath).delete();
+                    console.log('Deleted storage file:', filePath);
+                }
+            } catch (storageError) {
+                console.error('Error deleting storage file:', storageError);
+                // Continue with recipe deletion even if storage deletion fails
+            }
+        }
+
+        // Delete all folder_recipes references to this recipe
+        const folderRecipesSnapshot = await db.collection('folder_recipes')
+            .where('recipe_id', '==', recipeId)
+            .get();
+
+        const batch = db.batch();
+        folderRecipesSnapshot.docs.forEach(doc => {
+            batch.delete(doc.ref);
+        });
+
+        // Delete all ratings for this recipe
+        const ratingsSnapshot = await db.collection('ratings')
+            .where('recipe_id', '==', recipeId)
+            .get();
+
+        ratingsSnapshot.docs.forEach(doc => {
+            batch.delete(doc.ref);
+        });
+
+        // Delete the recipe document
+        batch.delete(db.collection('recipes').doc(recipeId));
+
+        await batch.commit();
+
+        res.json({
+            success: true,
+            message: 'Recipe deleted successfully',
+            deletedFolderLinks: folderRecipesSnapshot.size,
+            deletedRatings: ratingsSnapshot.size
+        });
+    } catch (error) {
+        console.error('Error deleting recipe:', error);
+        res.status(500).json({ error: 'Error deleting recipe' });
+    }
+});
+
+// Get admin stats
+app.get('/api/admin/stats', requireAuth, requireAdmin, async (req, res) => {
+    try {
+        // Count all recipes and filter out system ones manually (avoids index requirement)
+        const recipesSnapshot = await db.collection('recipes').get();
+        let recipeCount = 0;
+        recipesSnapshot.docs.forEach(doc => {
+            const data = doc.data();
+            if (data.user_id !== 'system') {
+                recipeCount++;
+            }
+        });
+
+        // Count users
+        const usersSnapshot = await db.collection('users').get();
+
+        res.json({
+            totalRecipes: recipeCount,
+            totalUsers: usersSnapshot.size
+        });
+    } catch (error) {
+        console.error('Error fetching admin stats:', error);
+        res.status(500).json({ error: 'Error fetching stats' });
     }
 });
 
