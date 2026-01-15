@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Recipe Collection</title>
     <base href="/">
-    <link rel="stylesheet" href="/styles.css?v=24">
+    <link rel="stylesheet" href="/styles.css?v=26">
 </head>
 
 <body>
@@ -40,7 +40,7 @@
                     <button class="logout-btn" id="logoutBtn">Logout</button>
                 </div>
             </div>
-            <button class="add-recipe-btn" id="addRecipeBtn">+ Add Recipe</button>
+            <button class="add-recipe-btn hidden" id="addRecipeBtn">+ Add Recipe</button>
 
             <div id="recipeContent" class="recipe-content">
                 <div class="landing-page">
@@ -206,6 +206,89 @@
                                 <span class="stat-label">Total Users</span>
                             </div>
                         </div>
+                        <div class="admin-stat-card pending">
+                            <span class="stat-icon">⏳</span>
+                            <div class="stat-info">
+                                <span class="stat-number" id="adminPendingRecipes">0</span>
+                                <span class="stat-label">Pending Review</span>
+                            </div>
+                        </div>
+                        <div class="admin-stat-card approved">
+                            <span class="stat-icon">✓</span>
+                            <div class="stat-info">
+                                <span class="stat-number" id="adminApprovedRecipes">0</span>
+                                <span class="stat-label">Approved</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Bulk Upload Section -->
+                    <div class="admin-bulk-upload-section">
+                        <div class="bulk-upload-header">
+                            <h2>Bulk Recipe Upload</h2>
+                            <button type="button" id="toggleBulkUpload" class="btn-secondary">Show Upload</button>
+                        </div>
+                        <div id="bulkUploadContent" class="bulk-upload-content hidden">
+                            <div class="csv-format-info">
+                                <h3>CSV Format</h3>
+                                <p>Upload a CSV file with the following columns:</p>
+                                <code>name, author, image, source_type, youtube_url, book_name, amazon_link, ingredients, instructions</code>
+                                <ul>
+                                    <li><strong>name</strong> - Recipe name (required)</li>
+                                    <li><strong>author</strong> - Recipe author (required)</li>
+                                    <li><strong>image</strong> - Local image file path (optional, select files below)</li>
+                                    <li><strong>source_type</strong> - youtube, cookbook, or manual</li>
+                                    <li><strong>youtube_url</strong> - YouTube URL (if source_type is youtube)</li>
+                                    <li><strong>book_name</strong> - Cookbook name (if source_type is cookbook)</li>
+                                    <li><strong>amazon_link</strong> - Amazon link (if source_type is cookbook)</li>
+                                    <li><strong>ingredients</strong> - Pipe-separated list (e.g., "1 cup flour|2 eggs|1 tsp salt")</li>
+                                    <li><strong>instructions</strong> - Pipe-separated list (e.g., "Preheat oven|Mix ingredients|Bake for 30 min")</li>
+                                </ul>
+                                <button type="button" id="downloadCsvTemplate" class="btn-secondary">Download Template</button>
+                            </div>
+                            <div class="bulk-upload-form">
+                                <div class="form-field">
+                                    <label for="csvFileInput">CSV File</label>
+                                    <input type="file" id="csvFileInput" accept=".csv">
+                                </div>
+                                <div class="form-field">
+                                    <label for="imageFilesInput">Image Files (select all images referenced in CSV)</label>
+                                    <input type="file" id="imageFilesInput" accept="image/*" multiple>
+                                    <p class="field-hint">Select images that match the filenames in your CSV's image column</p>
+                                </div>
+                                <div class="bulk-upload-actions">
+                                    <button type="button" id="previewCsvBtn" class="btn-secondary">Preview CSV</button>
+                                    <button type="button" id="startBulkUploadBtn" class="btn-primary" disabled>Start Upload</button>
+                                </div>
+                            </div>
+                            <div id="csvPreview" class="csv-preview hidden">
+                                <h3>Preview (<span id="csvPreviewCount">0</span> recipes)</h3>
+                                <div class="csv-preview-table-wrapper">
+                                    <table class="csv-preview-table">
+                                        <thead>
+                                            <tr>
+                                                <th>#</th>
+                                                <th>Name</th>
+                                                <th>Author</th>
+                                                <th>Image</th>
+                                                <th>Source</th>
+                                                <th>Ingredients</th>
+                                                <th>Instructions</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="csvPreviewBody"></tbody>
+                                    </table>
+                                </div>
+                            </div>
+                            <div id="bulkUploadProgress" class="bulk-upload-progress hidden">
+                                <h3>Upload Progress</h3>
+                                <div class="progress-bar-container">
+                                    <div class="progress-bar" id="bulkProgressBar"></div>
+                                </div>
+                                <p id="bulkProgressText">0 of 0 recipes uploaded</p>
+                                <div id="bulkUploadLog" class="upload-log"></div>
+                            </div>
+                        </div>
                     </div>
 
                     <div class="admin-recipes-section">
@@ -227,6 +310,7 @@
                                         <th>Recipe Name</th>
                                         <th>Author</th>
                                         <th>Created By</th>
+                                        <th>Status</th>
                                         <th>Date</th>
                                         <th>Actions</th>
                                     </tr>
@@ -554,7 +638,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-storage-compat.js"></script>
     <script src="/__/firebase/init.js"></script>
-    <script src="/script.js?v=29"></script>
+    <script src="/script.js?v=36"></script>
 </body>
 
 </html>

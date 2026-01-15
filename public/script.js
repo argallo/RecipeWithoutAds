@@ -1,129 +1,3 @@
-// Sample recipes data (for non-authenticated users)
-const sampleRecipes = [
-    {
-        id: 1,
-        name: "Classic Spaghetti Carbonara",
-        author: "Marco Rossi",
-        image: "https://images.unsplash.com/photo-1612874742237-6526221588e3?w=800&h=600&fit=crop",
-        source: {
-            type: "youtube",
-            youtubeUrl: "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
-        },
-        ingredients: [
-            "400g spaghetti",
-            "200g pancetta or guanciale, diced",
-            "4 large eggs",
-            "100g Pecorino Romano cheese, grated",
-            "Black pepper to taste",
-            "Salt for pasta water"
-        ],
-        instructions: [
-            "Bring a large pot of salted water to boil and cook spaghetti according to package directions.",
-            "While pasta cooks, fry pancetta in a large skillet over medium heat until crispy, about 5-7 minutes.",
-            "In a bowl, whisk together eggs, grated cheese, and a generous amount of black pepper.",
-            "Reserve 1 cup of pasta water, then drain the spaghetti.",
-            "Remove skillet from heat, add hot pasta to the pancetta and toss to combine.",
-            "Quickly add the egg mixture and toss vigorously, adding pasta water as needed to create a creamy sauce.",
-            "Serve immediately with extra cheese and black pepper."
-        ]
-    },
-    {
-        id: 2,
-        name: "Chicken Tikka Masala",
-        author: "Priya Sharma",
-        image: "https://images.unsplash.com/photo-1565557623262-b51c2513a641?w=800&h=600&fit=crop",
-        source: {
-            type: "cookbook",
-            bookName: "The Complete Indian Cooking",
-            amazonLink: "https://www.amazon.com/dp/EXAMPLE123"
-        },
-        ingredients: [
-            "800g boneless chicken thighs, cubed",
-            "1 cup plain yogurt",
-            "2 tbsp tikka masala spice blend",
-            "3 tbsp butter",
-            "1 large onion, diced",
-            "4 cloves garlic, minced",
-            "1 tbsp ginger, grated",
-            "400g crushed tomatoes",
-            "1 cup heavy cream",
-            "Fresh cilantro for garnish",
-            "Salt to taste"
-        ],
-        instructions: [
-            "Marinate chicken in yogurt and half the spice blend for at least 30 minutes.",
-            "Heat butter in a large pan over medium-high heat and cook chicken until browned. Set aside.",
-            "In the same pan, sauté onion until soft, about 5 minutes.",
-            "Add garlic, ginger, and remaining spices. Cook for 1 minute until fragrant.",
-            "Add crushed tomatoes and simmer for 10 minutes.",
-            "Stir in heavy cream and return chicken to the pan.",
-            "Simmer for 15-20 minutes until chicken is cooked through and sauce is thickened.",
-            "Garnish with fresh cilantro and serve with rice or naan."
-        ]
-    },
-    {
-        id: 3,
-        name: "Chocolate Chip Cookies",
-        author: "Betty Johnson",
-        image: "https://images.unsplash.com/photo-1499636136210-6f4ee915583e?w=800&h=600&fit=crop",
-        source: {
-            type: "manual"
-        },
-        ingredients: [
-            "2¼ cups all-purpose flour",
-            "1 tsp baking soda",
-            "1 tsp salt",
-            "1 cup butter, softened",
-            "¾ cup granulated sugar",
-            "¾ cup brown sugar",
-            "2 large eggs",
-            "2 tsp vanilla extract",
-            "2 cups chocolate chips"
-        ],
-        instructions: [
-            "Preheat oven to 375°F (190°C).",
-            "In a bowl, whisk together flour, baking soda, and salt.",
-            "In a large bowl, beat butter and both sugars until creamy.",
-            "Add eggs and vanilla to butter mixture and beat until combined.",
-            "Gradually stir in flour mixture until just combined.",
-            "Fold in chocolate chips.",
-            "Drop rounded tablespoons of dough onto ungreased baking sheets.",
-            "Bake for 9-11 minutes or until golden brown.",
-            "Cool on baking sheet for 2 minutes, then transfer to wire rack."
-        ]
-    },
-    {
-        id: 4,
-        name: "Greek Salad",
-        author: "Nikos Papadopoulos",
-        image: "https://images.unsplash.com/photo-1540189549336-e6e99c3679fe?w=800&h=600&fit=crop",
-        source: {
-            type: "youtube",
-            youtubeUrl: "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
-        },
-        ingredients: [
-            "4 large tomatoes, cut into wedges",
-            "1 cucumber, sliced",
-            "1 red onion, thinly sliced",
-            "1 green bell pepper, sliced",
-            "200g feta cheese, cubed",
-            "½ cup Kalamata olives",
-            "¼ cup olive oil",
-            "2 tbsp red wine vinegar",
-            "1 tsp dried oregano",
-            "Salt and pepper to taste"
-        ],
-        instructions: [
-            "In a large bowl, combine tomatoes, cucumber, onion, and bell pepper.",
-            "Add feta cheese and olives.",
-            "In a small bowl, whisk together olive oil, vinegar, oregano, salt, and pepper.",
-            "Pour dressing over salad and toss gently to combine.",
-            "Let sit for 10 minutes before serving to allow flavors to meld.",
-            "Serve at room temperature."
-        ]
-    }
-];
-
 // User recipes (for authenticated users)
 let recipes = [];
 
@@ -131,6 +5,7 @@ let recipes = [];
 let allRecipes = [];
 
 let currentRecipeId = null;
+let currentRecipe = null; // Store the full recipe object for the currently displayed recipe
 
 // Track checkbox state for each recipe
 let recipeState = {};
@@ -245,6 +120,8 @@ const longestStreakEl = document.getElementById('longestStreak');
 const adminPage = document.getElementById('adminPage');
 const adminTotalRecipes = document.getElementById('adminTotalRecipes');
 const adminTotalUsers = document.getElementById('adminTotalUsers');
+const adminPendingRecipes = document.getElementById('adminPendingRecipes');
+const adminApprovedRecipes = document.getElementById('adminApprovedRecipes');
 const adminSearchInput = document.getElementById('adminSearchInput');
 const adminSearchBtn = document.getElementById('adminSearchBtn');
 const adminRecipesTableBody = document.getElementById('adminRecipesTableBody');
@@ -495,20 +372,16 @@ function clearLocalHistory() {
 // Get current recipes based on authentication status
 // If useAllRecipes is true, returns all recipes from database for searching
 function getCurrentRecipes(useAllRecipes = false) {
-    // If requesting all recipes for search
-    if (useAllRecipes && isAuthenticated && allRecipes.length > 0) {
+    // If requesting all recipes for search/landing page
+    if (useAllRecipes && allRecipes.length > 0) {
         return allRecipes;
     }
-    // If authenticated but no recipes yet, show sample recipes
-    if (isAuthenticated && recipes.length === 0) {
-        return sampleRecipes;
-    }
     // If authenticated with recipes, show user recipes
-    if (isAuthenticated) {
+    if (isAuthenticated && recipes.length > 0) {
         return recipes;
     }
-    // If not authenticated, show sample recipes
-    return sampleRecipes;
+    // Fall back to all public recipes
+    return allRecipes;
 }
 
 // Helper function to extract YouTube video ID from URL
@@ -600,6 +473,7 @@ function showHomePage() {
 
     // Clear current recipe
     currentRecipeId = null;
+    currentRecipe = null;
 
     // Clear searches
     searchQuery = '';
@@ -635,8 +509,8 @@ async function showRecipeById(recipeId, pushState = true) {
         recipe = getCurrentRecipes(true).find(r => r.id === recipeId);
     }
 
-    // If not found locally, fetch from API (for shared links)
-    if (!recipe) {
+    // If not found locally OR missing full data (ingredients/instructions), fetch from API
+    if (!recipe || !recipe.ingredients || !recipe.instructions) {
         try {
             const response = await fetch(`/api/recipes/${recipeId}`);
             if (response.ok) {
@@ -667,6 +541,7 @@ async function showRecipeById(recipeId, pushState = true) {
     }
 
     currentRecipeId = recipeId;
+    currentRecipe = recipe; // Store full recipe for reset functionality
 
     // Initialize state for this recipe if it doesn't exist
     if (!recipeState[recipeId]) {
@@ -1558,6 +1433,21 @@ function clearLandingSearch() {
 }
 
 let selectedLandingAutocompleteIndex = -1;
+let landingSearchDebounceTimer = null;
+let landingSearchResults = [];
+
+async function searchPublicRecipes(query) {
+    try {
+        const response = await fetch(`/api/public/search?q=${encodeURIComponent(query)}&limit=20`);
+        if (response.ok) {
+            const data = await response.json();
+            return data.recipes || [];
+        }
+    } catch (error) {
+        console.error('Error searching public recipes:', error);
+    }
+    return [];
+}
 
 function handleLandingSearchInput(e) {
     const query = e.target.value;
@@ -1566,6 +1456,7 @@ function handleLandingSearchInput(e) {
 
     if (query.trim() === '') {
         landingAutocompleteDropdown.classList.remove('active');
+        landingSearchResults = [];
 
         // Restore the random recipes view
         const randomRecipesSection = document.querySelector('.random-recipes-section');
@@ -1575,8 +1466,27 @@ function handleLandingSearchInput(e) {
         return;
     }
 
-    const filtered = filterAllRecipes(query);
-    renderLandingAutocomplete(filtered);
+    // First show local results immediately for responsiveness
+    const localFiltered = filterAllRecipes(query);
+    landingSearchResults = localFiltered;
+    renderLandingAutocomplete(localFiltered);
+
+    // Then debounce the API call for more complete results
+    clearTimeout(landingSearchDebounceTimer);
+    landingSearchDebounceTimer = setTimeout(async () => {
+        const apiResults = await searchPublicRecipes(query);
+        if (apiResults.length > 0 && landingSearch.value.trim() === query.trim()) {
+            // Merge with local results, avoiding duplicates
+            const mergedResults = [...localFiltered];
+            apiResults.forEach(apiRecipe => {
+                if (!mergedResults.find(r => r.id === apiRecipe.id)) {
+                    mergedResults.push(apiRecipe);
+                }
+            });
+            landingSearchResults = mergedResults;
+            renderLandingAutocomplete(mergedResults);
+        }
+    }, 300);
 }
 
 function handleLandingSearchKeydown(e) {
@@ -1584,17 +1494,16 @@ function handleLandingSearchKeydown(e) {
 
     if (query === '') return;
 
-    const filtered = filterAllRecipes(query);
-    const suggestions = filtered.slice(0, 5);
+    const suggestions = landingSearchResults.slice(0, 5);
 
     if (e.key === 'ArrowDown') {
         e.preventDefault();
         selectedLandingAutocompleteIndex = Math.min(selectedLandingAutocompleteIndex + 1, suggestions.length - 1);
-        renderLandingAutocomplete(filtered);
+        renderLandingAutocomplete(landingSearchResults);
     } else if (e.key === 'ArrowUp') {
         e.preventDefault();
         selectedLandingAutocompleteIndex = Math.max(selectedLandingAutocompleteIndex - 1, -1);
-        renderLandingAutocomplete(filtered);
+        renderLandingAutocomplete(landingSearchResults);
     } else if (e.key === 'Enter') {
         e.preventDefault();
         if (selectedLandingAutocompleteIndex >= 0 && selectedLandingAutocompleteIndex < suggestions.length) {
@@ -1603,7 +1512,7 @@ function handleLandingSearchKeydown(e) {
             selectLandingAutocompleteItem(selectedRecipe);
         } else {
             // Show results page with all matching recipes
-            showLandingSearchResults(query, filtered);
+            showLandingSearchResults(query, landingSearchResults);
         }
     } else if (e.key === 'Escape') {
         landingAutocompleteDropdown.classList.remove('active');
@@ -1782,6 +1691,8 @@ function updateAuthUI() {
         loginBtn.classList.add('hidden');
         userDropdown.classList.remove('hidden');
         usernameDisplay.textContent = currentUser.username;
+        // Show add recipe button for logged in users
+        addRecipeBtn.classList.remove('hidden');
         // Show admin link if user is admin
         if (currentUser.isAdmin) {
             adminLink.classList.remove('hidden');
@@ -1792,6 +1703,7 @@ function updateAuthUI() {
         loginBtn.classList.remove('hidden');
         userDropdown.classList.add('hidden');
         adminLink.classList.add('hidden');
+        addRecipeBtn.classList.add('hidden');
     }
 }
 
@@ -1971,6 +1883,7 @@ async function handleLogout() {
         recipes = [];
         allRecipes = [];
         currentRecipeId = null;
+        currentRecipe = null;
         searchQuery = '';
         searchInput.value = '';
         filteredRecipes = [];
@@ -2149,6 +2062,8 @@ async function loadAdminStats() {
             const data = await response.json();
             adminTotalRecipes.textContent = data.totalRecipes;
             adminTotalUsers.textContent = data.totalUsers;
+            adminPendingRecipes.textContent = data.pendingRecipes || 0;
+            adminApprovedRecipes.textContent = data.approvedRecipes || 0;
         }
     } catch (error) {
         console.error('Error loading admin stats:', error);
@@ -2187,7 +2102,7 @@ function renderAdminRecipes() {
 
     if (adminRecipes.length === 0) {
         const tr = document.createElement('tr');
-        tr.innerHTML = '<td colspan="6" class="admin-empty-message">No recipes found</td>';
+        tr.innerHTML = '<td colspan="7" class="admin-empty-message">No recipes found</td>';
         adminRecipesTableBody.appendChild(tr);
         return;
     }
@@ -2197,6 +2112,9 @@ function renderAdminRecipes() {
         const createdDate = recipe.createdAt ?
             new Date(recipe.createdAt._seconds * 1000).toLocaleDateString() :
             'N/A';
+        const status = recipe.status || 'pending';
+        const statusBadgeClass = status === 'approved' ? 'status-approved' :
+                                  status === 'declined' ? 'status-declined' : 'status-pending';
 
         tr.innerHTML = `
             <td>
@@ -2211,15 +2129,30 @@ function renderAdminRecipes() {
             <td>
                 <span class="admin-user-badge">${escapeHtml(recipe.createdByUsername || 'Unknown')}</span>
             </td>
+            <td>
+                <span class="admin-status-badge ${statusBadgeClass}">${status}</span>
+            </td>
             <td>${createdDate}</td>
             <td>
-                <button class="admin-delete-btn" data-recipe-id="${recipe.id}" data-recipe-name="${escapeHtml(recipe.name)}" data-recipe-author="${escapeHtml(recipe.author || 'Unknown')}">Delete</button>
+                <div class="admin-actions">
+                    ${status !== 'approved' ? `<button class="admin-approve-btn" data-recipe-id="${recipe.id}" title="Approve">✓</button>` : ''}
+                    ${status !== 'declined' ? `<button class="admin-decline-btn" data-recipe-id="${recipe.id}" title="Decline">✕</button>` : ''}
+                    <button class="admin-delete-btn" data-recipe-id="${recipe.id}" data-recipe-name="${escapeHtml(recipe.name)}" data-recipe-author="${escapeHtml(recipe.author || 'Unknown')}" title="Delete">🗑</button>
+                </div>
             </td>
         `;
         adminRecipesTableBody.appendChild(tr);
     });
 
-    // Add event listeners to delete buttons
+    // Add event listeners to action buttons
+    adminRecipesTableBody.querySelectorAll('.admin-approve-btn').forEach(btn => {
+        btn.addEventListener('click', () => approveRecipe(btn.dataset.recipeId));
+    });
+
+    adminRecipesTableBody.querySelectorAll('.admin-decline-btn').forEach(btn => {
+        btn.addEventListener('click', () => declineRecipe(btn.dataset.recipeId));
+    });
+
     adminRecipesTableBody.querySelectorAll('.admin-delete-btn').forEach(btn => {
         btn.addEventListener('click', () => showDeleteConfirmation(
             btn.dataset.recipeId,
@@ -2281,6 +2214,58 @@ async function deleteAdminRecipe() {
     }
 }
 
+async function approveRecipe(recipeId) {
+    try {
+        const response = await apiFetch(`/api/admin/recipes/${recipeId}/approve`, {
+            method: 'POST'
+        });
+
+        if (response.ok) {
+            // Update the recipe in the local array
+            const recipe = adminRecipes.find(r => r.id === recipeId);
+            if (recipe) {
+                recipe.status = 'approved';
+            }
+            renderAdminRecipes();
+            await loadAdminStats();
+        } else {
+            const data = await response.json();
+            alert(`Error approving recipe: ${data.error || 'Unknown error'}`);
+        }
+    } catch (error) {
+        console.error('Error approving recipe:', error);
+        alert('Error approving recipe. Please try again.');
+    }
+}
+
+async function declineRecipe(recipeId) {
+    const reason = prompt('Optional: Enter a reason for declining this recipe (or leave blank):');
+
+    try {
+        const response = await apiFetch(`/api/admin/recipes/${recipeId}/decline`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ reason: reason || null })
+        });
+
+        if (response.ok) {
+            // Update the recipe in the local array
+            const recipe = adminRecipes.find(r => r.id === recipeId);
+            if (recipe) {
+                recipe.status = 'declined';
+            }
+            renderAdminRecipes();
+            await loadAdminStats();
+        } else {
+            const data = await response.json();
+            alert(`Error declining recipe: ${data.error || 'Unknown error'}`);
+        }
+    } catch (error) {
+        console.error('Error declining recipe:', error);
+        alert('Error declining recipe. Please try again.');
+    }
+}
+
 function handleAdminSearch() {
     const query = adminSearchInput.value.trim();
     loadAdminRecipes(1, query);
@@ -2325,6 +2310,307 @@ function setupAdminEventListeners() {
             hideDeleteConfirmation();
         }
     });
+
+    // Bulk upload event listeners
+    setupBulkUploadEventListeners();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Bulk Upload Functions
+// ═══════════════════════════════════════════════════════════════════════════
+
+let parsedCsvData = [];
+let selectedImageFiles = {};
+
+function setupBulkUploadEventListeners() {
+    const toggleBtn = document.getElementById('toggleBulkUpload');
+    const bulkContent = document.getElementById('bulkUploadContent');
+    const csvFileInput = document.getElementById('csvFileInput');
+    const imageFilesInput = document.getElementById('imageFilesInput');
+    const previewBtn = document.getElementById('previewCsvBtn');
+    const startUploadBtn = document.getElementById('startBulkUploadBtn');
+    const downloadTemplateBtn = document.getElementById('downloadCsvTemplate');
+
+    // Toggle bulk upload section
+    toggleBtn.addEventListener('click', () => {
+        bulkContent.classList.toggle('hidden');
+        toggleBtn.textContent = bulkContent.classList.contains('hidden') ? 'Show Upload' : 'Hide Upload';
+    });
+
+    // Handle image files selection
+    imageFilesInput.addEventListener('change', (e) => {
+        selectedImageFiles = {};
+        for (const file of e.target.files) {
+            // Store by filename (without path)
+            selectedImageFiles[file.name] = file;
+        }
+        console.log('Selected images:', Object.keys(selectedImageFiles));
+        // Re-render preview if CSV is already parsed
+        if (parsedCsvData.length > 0) {
+            renderCsvPreview();
+        }
+    });
+
+    // Preview CSV button
+    previewBtn.addEventListener('click', () => {
+        const file = csvFileInput.files[0];
+        if (!file) {
+            alert('Please select a CSV file first');
+            return;
+        }
+        parseCsvFile(file);
+    });
+
+    // Start upload button
+    startUploadBtn.addEventListener('click', startBulkUpload);
+
+    // Download template button
+    downloadTemplateBtn.addEventListener('click', downloadCsvTemplate);
+}
+
+function downloadCsvTemplate() {
+    const template = `name,author,image,source_type,youtube_url,book_name,amazon_link,ingredients,instructions
+"Classic Pancakes","Home Chef","pancakes.jpg","manual","","","","2 cups flour|2 eggs|1 cup milk|2 tbsp sugar|1 tsp baking powder|pinch of salt","Mix dry ingredients|Add wet ingredients and whisk|Heat pan with butter|Pour batter and cook until bubbles form|Flip and cook other side"
+"Pasta Carbonara","Italian Kitchen","carbonara.jpg","youtube","https://youtube.com/watch?v=example","","","400g spaghetti|200g pancetta|4 eggs|100g parmesan|black pepper","Cook pasta|Fry pancetta|Mix eggs with cheese|Combine all off heat|Serve immediately"`;
+
+    const blob = new Blob([template], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'recipe_template.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+}
+
+function parseCsvFile(file) {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        const text = e.target.result;
+        parsedCsvData = parseCsv(text);
+        renderCsvPreview();
+    };
+    reader.readAsText(file);
+}
+
+function parseCsv(text) {
+    const lines = text.split('\n');
+    const headers = parseCsvLine(lines[0]);
+    const recipes = [];
+
+    for (let i = 1; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (!line) continue;
+
+        const values = parseCsvLine(line);
+        const recipe = {};
+
+        headers.forEach((header, index) => {
+            recipe[header.trim().toLowerCase()] = values[index] || '';
+        });
+
+        // Only include if name exists
+        if (recipe.name) {
+            recipes.push(recipe);
+        }
+    }
+
+    return recipes;
+}
+
+function parseCsvLine(line) {
+    const result = [];
+    let current = '';
+    let inQuotes = false;
+
+    for (let i = 0; i < line.length; i++) {
+        const char = line[i];
+
+        if (char === '"') {
+            if (inQuotes && line[i + 1] === '"') {
+                current += '"';
+                i++;
+            } else {
+                inQuotes = !inQuotes;
+            }
+        } else if (char === ',' && !inQuotes) {
+            result.push(current.trim());
+            current = '';
+        } else {
+            current += char;
+        }
+    }
+    result.push(current.trim());
+
+    return result;
+}
+
+function renderCsvPreview() {
+    const previewSection = document.getElementById('csvPreview');
+    const previewBody = document.getElementById('csvPreviewBody');
+    const previewCount = document.getElementById('csvPreviewCount');
+    const startUploadBtn = document.getElementById('startBulkUploadBtn');
+
+    previewSection.classList.remove('hidden');
+    previewCount.textContent = parsedCsvData.length;
+    previewBody.innerHTML = '';
+
+    parsedCsvData.forEach((recipe, index) => {
+        const tr = document.createElement('tr');
+
+        // Check if image file is available
+        let imageStatus = '';
+        if (recipe.image) {
+            const filename = recipe.image.split(/[\\/]/).pop(); // Get filename from path
+            if (selectedImageFiles[filename]) {
+                imageStatus = `<span class="image-status image-found">Found: ${filename}</span>`;
+            } else {
+                imageStatus = `<span class="image-status image-missing">Missing: ${filename}</span>`;
+            }
+        } else {
+            imageStatus = `<span class="image-status image-none">No image</span>`;
+        }
+
+        // Format source
+        let sourceDisplay = recipe.source_type || 'manual';
+        if (recipe.source_type === 'youtube' && recipe.youtube_url) {
+            sourceDisplay = 'YouTube';
+        } else if (recipe.source_type === 'cookbook' && recipe.book_name) {
+            sourceDisplay = `Book: ${recipe.book_name}`;
+        }
+
+        // Count ingredients and instructions
+        const ingredientCount = recipe.ingredients ? recipe.ingredients.split('|').length : 0;
+        const instructionCount = recipe.instructions ? recipe.instructions.split('|').length : 0;
+
+        tr.innerHTML = `
+            <td>${index + 1}</td>
+            <td title="${escapeHtml(recipe.name)}">${escapeHtml(recipe.name)}</td>
+            <td title="${escapeHtml(recipe.author || '')}">${escapeHtml(recipe.author || 'Unknown')}</td>
+            <td>${imageStatus}</td>
+            <td>${escapeHtml(sourceDisplay)}</td>
+            <td>${ingredientCount} items</td>
+            <td>${instructionCount} steps</td>
+        `;
+        previewBody.appendChild(tr);
+    });
+
+    // Enable upload button if we have recipes
+    startUploadBtn.disabled = parsedCsvData.length === 0;
+}
+
+async function startBulkUpload() {
+    if (parsedCsvData.length === 0) {
+        alert('No recipes to upload');
+        return;
+    }
+
+    const progressSection = document.getElementById('bulkUploadProgress');
+    const progressBar = document.getElementById('bulkProgressBar');
+    const progressText = document.getElementById('bulkProgressText');
+    const uploadLog = document.getElementById('bulkUploadLog');
+    const startUploadBtn = document.getElementById('startBulkUploadBtn');
+
+    // Show progress section
+    progressSection.classList.remove('hidden');
+    uploadLog.innerHTML = '';
+    startUploadBtn.disabled = true;
+
+    let successCount = 0;
+    let errorCount = 0;
+
+    for (let i = 0; i < parsedCsvData.length; i++) {
+        const recipe = parsedCsvData[i];
+        const progress = ((i + 1) / parsedCsvData.length) * 100;
+        progressBar.style.width = `${progress}%`;
+        progressText.textContent = `${i + 1} of ${parsedCsvData.length} recipes processed`;
+
+        try {
+            await uploadSingleRecipe(recipe, i + 1, uploadLog);
+            successCount++;
+        } catch (error) {
+            errorCount++;
+            addLogEntry(uploadLog, `Error uploading "${recipe.name}": ${error.message}`, 'error');
+        }
+    }
+
+    // Final summary
+    addLogEntry(uploadLog, `Upload complete: ${successCount} succeeded, ${errorCount} failed`, 'info');
+    startUploadBtn.disabled = false;
+
+    // Refresh admin recipes list
+    await loadAdminRecipes();
+    await loadAdminStats();
+}
+
+async function uploadSingleRecipe(recipeData, index, uploadLog) {
+    addLogEntry(uploadLog, `[${index}] Uploading "${recipeData.name}"...`, 'info');
+
+    // Handle image upload if specified
+    let imageUrl = null;
+    if (recipeData.image) {
+        const filename = recipeData.image.split(/[\\/]/).pop();
+        const imageFile = selectedImageFiles[filename];
+
+        if (imageFile) {
+            try {
+                imageUrl = await uploadRecipeImage(imageFile);
+                addLogEntry(uploadLog, `[${index}] Image uploaded: ${filename}`, 'success');
+            } catch (error) {
+                addLogEntry(uploadLog, `[${index}] Image upload failed: ${error.message}`, 'error');
+            }
+        } else {
+            addLogEntry(uploadLog, `[${index}] Image file not found: ${filename}`, 'error');
+        }
+    }
+
+    // Build source object
+    let source = { type: recipeData.source_type || 'manual' };
+    if (recipeData.source_type === 'youtube' && recipeData.youtube_url) {
+        source.youtubeUrl = recipeData.youtube_url;
+    } else if (recipeData.source_type === 'cookbook') {
+        source.bookName = recipeData.book_name || '';
+        source.amazonLink = recipeData.amazon_link || '';
+    }
+
+    // Parse ingredients and instructions (pipe-separated)
+    const ingredients = recipeData.ingredients
+        ? recipeData.ingredients.split('|').map(s => s.trim()).filter(s => s)
+        : [];
+    const instructions = recipeData.instructions
+        ? recipeData.instructions.split('|').map(s => s.trim()).filter(s => s)
+        : [];
+
+    // Create recipe via API
+    const payload = {
+        name: recipeData.name,
+        author: recipeData.author || 'Unknown',
+        image: imageUrl,
+        source: source,
+        ingredients: ingredients,
+        instructions: instructions
+    };
+
+    const response = await apiFetch('/api/recipes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to create recipe');
+    }
+
+    addLogEntry(uploadLog, `[${index}] Recipe created: "${recipeData.name}"`, 'success');
+    return await response.json();
+}
+
+function addLogEntry(logContainer, message, type) {
+    const entry = document.createElement('div');
+    entry.className = `log-entry log-${type}`;
+    entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+    logContainer.appendChild(entry);
+    logContainer.scrollTop = logContainer.scrollHeight;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -2488,6 +2774,20 @@ function switchToLogin() {
     showLoginModal();
 }
 
+// Load public recipes for landing page (no auth required)
+async function loadPublicRecipes() {
+    try {
+        const response = await fetch('/api/public/recipes?limit=12');
+        if (response.ok) {
+            const data = await response.json();
+            allRecipes = data.recipes;
+            renderRandomRecipes();
+        }
+    } catch (error) {
+        console.error('Error loading public recipes:', error);
+    }
+}
+
 // Initialize
 async function init() {
     filteredRecipes = [];
@@ -2496,6 +2796,10 @@ async function init() {
     setupAdminEventListeners();
     initAddRecipeForm();
     initImageUpload();
+
+    // Load public recipes for landing page (before auth check)
+    await loadPublicRecipes();
+
     await checkAuthStatus();
 
     // Handle invitation from URL
@@ -2673,8 +2977,8 @@ function renderGuestHistory() {
     ul.className = 'recipe-list';
 
     history.forEach(recipeId => {
-        // Find recipe in sampleRecipes
-        const recipe = sampleRecipes.find(r => r.id === recipeId);
+        // Find recipe in allRecipes
+        const recipe = allRecipes.find(r => r.id === recipeId);
         if (recipe) {
             const li = document.createElement('li');
             li.textContent = recipe.name;
@@ -2810,21 +3114,25 @@ function renderInstructions(recipe, recipeId) {
 
 // Reset recipe progress
 function resetRecipe() {
-    if (!currentRecipeId) return;
+    if (!currentRecipeId || !currentRecipe) {
+        console.error('Cannot reset: no current recipe', { currentRecipeId, currentRecipe });
+        return;
+    }
 
-    const currentRecipes = getCurrentRecipes();
-    const recipe = currentRecipes.find(r => r.id === currentRecipeId);
-    if (!recipe) return;
+    if (!currentRecipe.ingredients || !currentRecipe.instructions) {
+        console.error('Cannot reset: recipe missing data', currentRecipe);
+        return;
+    }
 
     // Reset all checkboxes to unchecked
     recipeState[currentRecipeId] = {
-        ingredients: new Array(recipe.ingredients.length).fill(false),
-        instructions: new Array(recipe.instructions.length).fill(false)
+        ingredients: new Array(currentRecipe.ingredients.length).fill(false),
+        instructions: new Array(currentRecipe.instructions.length).fill(false)
     };
 
     // Re-render the ingredients and instructions
-    renderIngredients(recipe, currentRecipeId);
-    renderInstructions(recipe, currentRecipeId);
+    renderIngredients(currentRecipe, currentRecipeId);
+    renderInstructions(currentRecipe, currentRecipeId);
 }
 
 // Return to home page

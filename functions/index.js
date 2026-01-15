@@ -14,7 +14,10 @@ if (process.env.FUNCTIONS_EMULATOR === 'true' || process.env.FIRESTORE_EMULATOR_
 } else {
     admin.initializeApp();
 }
-const db = admin.firestore();
+
+// Use the 'recipedb' named database
+const { getFirestore } = require('firebase-admin/firestore');
+const db = getFirestore('recipedb');
 
 const app = express();
 
@@ -104,174 +107,138 @@ function isUserAdmin(email) {
     return adminEmails.includes(email?.toLowerCase());
 }
 
-// ============================================
-// INITIALIZATION - SEED SAMPLE RECIPES
-// ============================================
+// Helper to check if a user is trusted (can post globally without approval)
+async function isUserTrusted(userId) {
+    const userDoc = await db.collection('users').doc(userId).get();
+    if (!userDoc.exists) return false;
+    const userData = userDoc.data();
+    // Admins are always trusted
+    if (isUserAdmin(userData.email)) return true;
+    // Check trusted flag
+    return userData.is_trusted === true;
+}
 
-const sampleRecipes = [
-    {
-        id: 'recipe_1',
-        user_id: 'system',
-        name: "Classic Spaghetti Carbonara",
-        author: "Marco Rossi",
-        image: "https://images.unsplash.com/photo-1612874742237-6526221588e3?w=800&h=600&fit=crop",
-        source_type: "youtube",
-        source_data: {
-            type: "youtube",
-            youtubeUrl: "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
-        },
-        ingredients: [
-            "400g spaghetti",
-            "200g guanciale or pancetta",
-            "4 large eggs",
-            "100g Pecorino Romano cheese, grated",
-            "Black pepper to taste",
-            "Salt for pasta water"
-        ],
-        instructions: [
-            "Bring a large pot of salted water to boil and cook spaghetti according to package directions",
-            "While pasta cooks, cut guanciale into small strips and cook in a large pan until crispy",
-            "In a bowl, whisk together eggs, grated Pecorino, and plenty of black pepper",
-            "Reserve 1 cup of pasta water, then drain the spaghetti",
-            "Remove pan from heat, add pasta to the guanciale",
-            "Quickly stir in the egg mixture, adding pasta water as needed to create a creamy sauce",
-            "Serve immediately with extra Pecorino and black pepper"
-        ],
-        created_at: null
-    },
-    {
-        id: 'recipe_2',
-        user_id: 'system',
-        name: "Chicken Tikka Masala",
-        author: "Priya Sharma",
-        image: "https://images.unsplash.com/photo-1565557623262-b51c2513a641?w=800&h=600&fit=crop",
-        source_type: "cookbook",
-        source_data: {
-            type: "cookbook",
-            bookName: "Indian Cuisine Masterclass",
-            amazonLink: "https://www.amazon.com/dp/example"
-        },
-        ingredients: [
-            "500g chicken breast, cubed",
-            "1 cup yogurt",
-            "2 tbsp tikka masala spice blend",
-            "3 tbsp butter",
-            "1 onion, diced",
-            "3 cloves garlic, minced",
-            "1 tbsp ginger, grated",
-            "400ml tomato sauce",
-            "200ml heavy cream",
-            "Fresh cilantro for garnish"
-        ],
-        instructions: [
-            "Marinate chicken in yogurt and half the tikka masala spices for at least 1 hour",
-            "Grill or pan-fry the marinated chicken until cooked through, set aside",
-            "In a large pan, melt butter and sauté onion until softened",
-            "Add garlic and ginger, cook for 1 minute until fragrant",
-            "Stir in remaining spices and cook for 30 seconds",
-            "Add tomato sauce and simmer for 10 minutes",
-            "Stir in cream and cooked chicken, simmer for another 5 minutes",
-            "Garnish with fresh cilantro and serve with rice or naan"
-        ],
-        created_at: null
-    },
-    {
-        id: 'recipe_3',
-        user_id: 'system',
-        name: "Chocolate Chip Cookies",
-        author: "Betty Johnson",
-        image: "https://images.unsplash.com/photo-1499636136210-6f4ee915583e?w=800&h=600&fit=crop",
-        source_type: "manual",
-        source_data: {
-            type: "manual"
-        },
-        ingredients: [
-            "2 1/4 cups all-purpose flour",
-            "1 tsp baking soda",
-            "1 tsp salt",
-            "1 cup butter, softened",
-            "3/4 cup granulated sugar",
-            "3/4 cup brown sugar",
-            "2 large eggs",
-            "2 tsp vanilla extract",
-            "2 cups chocolate chips"
-        ],
-        instructions: [
-            "Preheat oven to 375°F (190°C)",
-            "Mix flour, baking soda, and salt in a bowl",
-            "In another bowl, cream together butter and both sugars until fluffy",
-            "Beat in eggs and vanilla",
-            "Gradually blend in the dry ingredients",
-            "Stir in chocolate chips",
-            "Drop rounded tablespoons of dough onto ungreased cookie sheets",
-            "Bake for 9-11 minutes or until golden brown",
-            "Cool on baking sheet for 2 minutes, then transfer to wire rack"
-        ],
-        created_at: null
-    },
-    {
-        id: 'recipe_4',
-        user_id: 'system',
-        name: "Greek Salad",
-        author: "Nikos Papadopoulos",
-        image: "https://images.unsplash.com/photo-1540189549336-e6e99c3679fe?w=800&h=600&fit=crop",
-        source_type: "manual",
-        source_data: {
-            type: "manual"
-        },
-        ingredients: [
-            "4 large tomatoes, cut into wedges",
-            "1 cucumber, sliced",
-            "1 red onion, thinly sliced",
-            "1 green bell pepper, sliced",
-            "200g feta cheese, cubed",
-            "1/2 cup Kalamata olives",
-            "3 tbsp olive oil",
-            "1 tbsp red wine vinegar",
-            "1 tsp dried oregano",
-            "Salt and pepper to taste"
-        ],
-        instructions: [
-            "Combine tomatoes, cucumber, onion, and bell pepper in a large bowl",
-            "Add feta cheese and olives",
-            "Drizzle with olive oil and vinegar",
-            "Sprinkle with oregano, salt, and pepper",
-            "Toss gently to combine",
-            "Serve immediately or chill for 30 minutes before serving"
-        ],
-        created_at: null
-    }
-];
-
-// Seed sample recipes on first deploy
-async function seedSampleRecipes() {
+// Helper to update user trust status based on recipe approvals
+async function updateUserTrustStatus(userId) {
     try {
-        const recipesRef = db.collection('recipes');
-        for (const recipe of sampleRecipes) {
-            const recipeDoc = await recipesRef.doc(recipe.id).get();
-            if (!recipeDoc.exists) {
-                // Add timestamp when actually inserting
-                const recipeWithTimestamp = {
-                    ...recipe,
-                    created_at: admin.firestore.FieldValue.serverTimestamp()
-                };
-                await recipesRef.doc(recipe.id).set(recipeWithTimestamp);
-                console.log(`Seeded recipe: ${recipe.name}`);
+        // Count approved and declined recipes for this user
+        const recipesSnapshot = await db.collection('recipes')
+            .where('user_id', '==', userId)
+            .get();
+
+        let approvedCount = 0;
+        let declinedCount = 0;
+
+        recipesSnapshot.docs.forEach(doc => {
+            const data = doc.data();
+            if (data.status === 'approved') approvedCount++;
+            if (data.status === 'declined') declinedCount++;
+        });
+
+        // User becomes trusted if they have 2+ approved and 0 declined
+        const shouldBeTrusted = approvedCount >= 2 && declinedCount === 0;
+
+        const userDoc = await db.collection('users').doc(userId).get();
+        if (userDoc.exists) {
+            const userData = userDoc.data();
+            // Don't downgrade admins
+            if (!isUserAdmin(userData.email)) {
+                await db.collection('users').doc(userId).update({
+                    is_trusted: shouldBeTrusted,
+                    approved_recipes_count: approvedCount,
+                    declined_recipes_count: declinedCount
+                });
             }
         }
+
+        return shouldBeTrusted;
     } catch (error) {
-        console.error('Error seeding recipes:', error);
+        console.error('Error updating user trust status:', error);
+        return false;
     }
 }
 
-// Seed on first request (not at module load to avoid deployment errors)
-let seeded = false;
-app.use(async (req, res, next) => {
-    if (!seeded) {
-        seeded = true;
-        seedSampleRecipes().catch(err => console.error('Seed error:', err));
+// ============================================
+// PUBLIC ROUTES (No auth required)
+// ============================================
+
+// Get recent public recipes for landing page (no auth required)
+// Only returns approved recipes that are globally visible
+app.get('/api/public/recipes', async (req, res) => {
+    try {
+        const limit = parseInt(req.query.limit) || 12;
+
+        // Get approved recipes only
+        const snapshot = await db.collection('recipes')
+            .where('status', '==', 'approved')
+            .orderBy('created_at', 'desc')
+            .limit(limit * 2) // Fetch more to filter for images
+            .get();
+
+        const recipes = [];
+        for (const doc of snapshot.docs) {
+            const data = doc.data();
+            // Only include recipes with images for the landing page
+            if (data.image && recipes.length < limit) {
+                recipes.push({
+                    id: doc.id,
+                    name: data.name,
+                    author: data.author || 'Unknown',
+                    image: data.image,
+                    source: data.source_data || { type: data.source_type }
+                });
+            }
+        }
+
+        res.json({ recipes });
+    } catch (error) {
+        console.error('Error fetching public recipes:', error);
+        res.status(500).json({ error: 'Error fetching recipes' });
     }
-    next();
+});
+
+// Search approved public recipes (no auth required)
+app.get('/api/public/search', async (req, res) => {
+    try {
+        const query = (req.query.q || '').toLowerCase().trim();
+        const limit = parseInt(req.query.limit) || 20;
+
+        if (!query) {
+            return res.json({ recipes: [] });
+        }
+
+        // Get all approved recipes (Firestore doesn't support full-text search)
+        const snapshot = await db.collection('recipes')
+            .where('status', '==', 'approved')
+            .orderBy('created_at', 'desc')
+            .limit(100) // Limit to prevent excessive reads
+            .get();
+
+        // Filter by search query on name and author
+        const recipes = [];
+        for (const doc of snapshot.docs) {
+            if (recipes.length >= limit) break;
+
+            const data = doc.data();
+            const nameMatch = data.name?.toLowerCase().includes(query);
+            const authorMatch = data.author?.toLowerCase().includes(query);
+
+            if (nameMatch || authorMatch) {
+                recipes.push({
+                    id: doc.id,
+                    name: data.name,
+                    author: data.author || 'Unknown',
+                    image: data.image,
+                    source: data.source_data || { type: data.source_type }
+                });
+            }
+        }
+
+        res.json({ recipes });
+    } catch (error) {
+        console.error('Error searching public recipes:', error);
+        res.status(500).json({ error: 'Error searching recipes' });
+    }
 });
 
 // ============================================
@@ -290,7 +257,12 @@ app.post('/api/user/create', requireAuth, async (req, res) => {
             const userData = userDoc.data();
             return res.json({
                 success: true,
-                user: { id: userId, username: userData.username, email: userData.email }
+                user: {
+                    id: userId,
+                    username: userData.username,
+                    email: userData.email,
+                    isAdmin: isUserAdmin(userData.email)
+                }
             });
         }
 
@@ -317,9 +289,15 @@ app.post('/api/user/create', requireAuth, async (req, res) => {
         // Create default folders
         await ensureDefaultFolders(userId);
 
+        const userEmail = email.toLowerCase();
         res.json({
             success: true,
-            user: { id: userId, username: trimmedUsername, email: email.toLowerCase() }
+            user: {
+                id: userId,
+                username: trimmedUsername,
+                email: userEmail,
+                isAdmin: isUserAdmin(userEmail)
+            }
         });
     } catch (error) {
         console.error('User creation error:', error);
@@ -390,7 +368,12 @@ app.post('/api/user/repair', requireAuth, async (req, res) => {
 
         res.json({
             success: true,
-            user: { id: userId, username: correctUsername, email: firebaseUser.email }
+            user: {
+                id: userId,
+                username: correctUsername,
+                email: firebaseUser.email,
+                isAdmin: isUserAdmin(firebaseUser.email)
+            }
         });
     } catch (error) {
         console.error('Repair error:', error);
@@ -491,6 +474,11 @@ app.post('/api/recipes', requireAuth, async (req, res) => {
             return res.status(400).json({ error: 'Missing source type' });
         }
 
+        // Determine recipe status based on user type
+        // Admins and trusted users get auto-approved, others are pending
+        const isTrusted = await isUserTrusted(userId);
+        const status = isTrusted ? 'approved' : 'pending';
+
         const recipeData = {
             user_id: userId,
             name,
@@ -500,6 +488,7 @@ app.post('/api/recipes', requireAuth, async (req, res) => {
             source_data: source,
             ingredients: Array.isArray(ingredients) ? ingredients : [],
             instructions: Array.isArray(instructions) ? instructions : [],
+            status: status, // 'pending', 'approved', or 'declined'
             created_at: admin.firestore.FieldValue.serverTimestamp()
         };
 
@@ -1316,7 +1305,7 @@ app.post('/api/folders/:id/invite', requireAuth, async (req, res) => {
         });
 
         // Send invitation email
-        const appUrl = process.env.APP_URL || 'http://localhost:8000';
+        const appUrl = process.env.APP_URL || 'https://gitdish.com';
         const inviteUrl = `${appUrl}/home?invite=${token}`;
 
         const mailOptions = {
@@ -1772,6 +1761,7 @@ app.get('/api/admin/recipes', requireAuth, requireAdmin, async (req, res) => {
                 image: data.image,
                 source_type: data.source_type,
                 user_id: data.user_id,
+                status: data.status || 'pending', // Default to pending for legacy recipes
                 createdByUsername: username,
                 userEmail: userEmail,
                 createdAt: data.created_at ? { _seconds: Math.floor(data.created_at.toDate().getTime() / 1000) } : null,
@@ -1891,25 +1881,116 @@ app.delete('/api/admin/recipes/:id', requireAuth, requireAdmin, async (req, res)
     }
 });
 
+// Approve a recipe (admin only)
+app.post('/api/admin/recipes/:id/approve', requireAuth, requireAdmin, async (req, res) => {
+    try {
+        const recipeId = req.params.id;
+
+        const recipeDoc = await db.collection('recipes').doc(recipeId).get();
+
+        if (!recipeDoc.exists) {
+            return res.status(404).json({ error: 'Recipe not found' });
+        }
+
+        const recipeData = recipeDoc.data();
+
+        // Update recipe status to approved
+        await db.collection('recipes').doc(recipeId).update({
+            status: 'approved',
+            approved_at: admin.firestore.FieldValue.serverTimestamp(),
+            approved_by: req.userId
+        });
+
+        // Update user trust status based on new approval counts
+        if (recipeData.user_id && recipeData.user_id !== 'system') {
+            await updateUserTrustStatus(recipeData.user_id);
+        }
+
+        res.json({
+            success: true,
+            message: 'Recipe approved successfully'
+        });
+    } catch (error) {
+        console.error('Error approving recipe:', error);
+        res.status(500).json({ error: 'Error approving recipe' });
+    }
+});
+
+// Decline a recipe (admin only)
+app.post('/api/admin/recipes/:id/decline', requireAuth, requireAdmin, async (req, res) => {
+    try {
+        const recipeId = req.params.id;
+        const { reason } = req.body;
+
+        const recipeDoc = await db.collection('recipes').doc(recipeId).get();
+
+        if (!recipeDoc.exists) {
+            return res.status(404).json({ error: 'Recipe not found' });
+        }
+
+        const recipeData = recipeDoc.data();
+
+        // Update recipe status to declined
+        await db.collection('recipes').doc(recipeId).update({
+            status: 'declined',
+            declined_at: admin.firestore.FieldValue.serverTimestamp(),
+            declined_by: req.userId,
+            decline_reason: reason || null
+        });
+
+        // Update user trust status based on new decline counts
+        if (recipeData.user_id && recipeData.user_id !== 'system') {
+            await updateUserTrustStatus(recipeData.user_id);
+        }
+
+        res.json({
+            success: true,
+            message: 'Recipe declined'
+        });
+    } catch (error) {
+        console.error('Error declining recipe:', error);
+        res.status(500).json({ error: 'Error declining recipe' });
+    }
+});
+
 // Get admin stats
 app.get('/api/admin/stats', requireAuth, requireAdmin, async (req, res) => {
     try {
         // Count all recipes and filter out system ones manually (avoids index requirement)
         const recipesSnapshot = await db.collection('recipes').get();
         let recipeCount = 0;
+        let pendingCount = 0;
+        let approvedCount = 0;
+        let declinedCount = 0;
+
         recipesSnapshot.docs.forEach(doc => {
             const data = doc.data();
             if (data.user_id !== 'system') {
                 recipeCount++;
+                const status = data.status || 'pending';
+                if (status === 'pending') pendingCount++;
+                else if (status === 'approved') approvedCount++;
+                else if (status === 'declined') declinedCount++;
             }
         });
 
         // Count users
         const usersSnapshot = await db.collection('users').get();
 
+        // Count trusted users
+        let trustedCount = 0;
+        usersSnapshot.docs.forEach(doc => {
+            const data = doc.data();
+            if (data.is_trusted === true) trustedCount++;
+        });
+
         res.json({
             totalRecipes: recipeCount,
-            totalUsers: usersSnapshot.size
+            totalUsers: usersSnapshot.size,
+            pendingRecipes: pendingCount,
+            approvedRecipes: approvedCount,
+            declinedRecipes: declinedCount,
+            trustedUsers: trustedCount
         });
     } catch (error) {
         console.error('Error fetching admin stats:', error);

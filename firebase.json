@@ -23,6 +23,7 @@
     "runtime": "nodejs20"
   },
   "firestore": {
+    "database": "recipedb",
     "rules": "firestore.rules",
     "indexes": "firestore.indexes.json"
   },
