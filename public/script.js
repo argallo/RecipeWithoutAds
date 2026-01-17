@@ -29,6 +29,9 @@ const addRecipeModal = document.getElementById('addRecipeModal');
 const addRecipeForm = document.getElementById('addRecipeForm');
 const cancelBtn = document.getElementById('cancelBtn');
 const resetBtn = document.getElementById('resetBtn');
+const editRecipeBtn = document.getElementById('editRecipeBtn');
+const forkRecipeBtn = document.getElementById('forkRecipeBtn');
+const recipeForkedFrom = document.getElementById('recipeForkedFrom');
 const menuToggleBtn = document.getElementById('menuToggleBtn');
 const sidebar = document.getElementById('recipeList-sidebar');
 const sidebarOverlay = document.getElementById('sidebarOverlay');
@@ -154,6 +157,14 @@ const storage = firebase.storage();
 // Image upload state
 let selectedImageFile = null;
 let uploadedImageUrl = null;
+
+// Edit mode state
+let isEditMode = false;
+let editingRecipeId = null;
+
+// Fork mode state
+let isForkMode = false;
+let forkingFromRecipe = null;
 
 // Folder state
 let folders = [];
@@ -532,6 +543,11 @@ async function showRecipeById(recipeId, pushState = true) {
         return;
     }
 
+    // Ensure source_data is transformed to source for all recipes
+    if (recipe.source_data && !recipe.source) {
+        recipe.source = recipe.source_data;
+    }
+
     if (pushState) {
         const recipeUrl = getRecipeUrl(recipe);
         navigateTo(recipeUrl, { recipeId });
@@ -618,6 +634,28 @@ async function showRecipeById(recipeId, pushState = true) {
         addToFolderBtn.classList.remove('hidden');
     } else {
         addToFolderBtn.classList.add('hidden');
+    }
+
+    // Show "Edit Recipe" button for admins
+    if (isAuthenticated && currentUser && currentUser.isAdmin) {
+        editRecipeBtn.classList.remove('hidden');
+    } else {
+        editRecipeBtn.classList.add('hidden');
+    }
+
+    // Show "Fork Recipe" button for approved recipes when user is authenticated
+    if (isAuthenticated && recipe.status === 'approved') {
+        forkRecipeBtn.classList.remove('hidden');
+    } else {
+        forkRecipeBtn.classList.add('hidden');
+    }
+
+    // Display "Forked from" link if recipe has forked_from field
+    if (recipe.forked_from && recipe.forked_from.recipe_id) {
+        recipeForkedFrom.innerHTML = `Forked from: <a href="/recipe/${recipe.forked_from.recipe_id}" onclick="event.preventDefault(); showRecipeById('${recipe.forked_from.recipe_id}', true);">${recipe.forked_from.recipe_name || 'Original Recipe'}</a>`;
+        recipeForkedFrom.classList.remove('hidden');
+    } else {
+        recipeForkedFrom.classList.add('hidden');
     }
 }
 
@@ -3290,15 +3328,47 @@ function setupEventListeners() {
         if (!formIngredientsList || !formInstructionsList) {
             initAddRecipeForm();
         }
+        // Reset edit mode, fork mode, and title
+        isEditMode = false;
+        editingRecipeId = null;
+        isForkMode = false;
+        forkingFromRecipe = null;
+        const modalTitle = addRecipeModal.querySelector('h2');
+        if (modalTitle) {
+            modalTitle.textContent = 'Add Recipe';
+        }
         addRecipeModal.classList.remove('hidden');
     });
 
     resetBtn.addEventListener('click', resetRecipe);
 
+    editRecipeBtn.addEventListener('click', () => {
+        if (!isAuthenticated || !currentUser?.isAdmin || !currentRecipe) {
+            return;
+        }
+        openEditRecipeModal(currentRecipe);
+    });
+
+    forkRecipeBtn.addEventListener('click', () => {
+        if (!isAuthenticated || !currentRecipe) {
+            showLoginModal();
+            return;
+        }
+        if (currentRecipe.status !== 'approved') {
+            alert('Only approved recipes can be forked');
+            return;
+        }
+        openForkRecipeModal(currentRecipe);
+    });
+
     cancelBtn.addEventListener('click', () => {
         addRecipeModal.classList.add('hidden');
         resetAddRecipeForm();
         hideAllConditionalFields();
+        isEditMode = false;
+        editingRecipeId = null;
+        isForkMode = false;
+        forkingFromRecipe = null;
     });
 
     addRecipeModal.addEventListener('click', (e) => {
@@ -3306,6 +3376,10 @@ function setupEventListeners() {
             addRecipeModal.classList.add('hidden');
             resetAddRecipeForm();
             hideAllConditionalFields();
+            isEditMode = false;
+            editingRecipeId = null;
+            isForkMode = false;
+            forkingFromRecipe = null;
         }
     });
 
@@ -3324,6 +3398,12 @@ function setupEventListeners() {
             document.getElementById('amazonLink').required = true;
         }
     });
+
+    // Handle YouTube recipe extraction
+    const extractYoutubeBtn = document.getElementById('extractYoutubeBtn');
+    if (extractYoutubeBtn) {
+        extractYoutubeBtn.addEventListener('click', extractRecipeFromYoutube);
+    }
 
     addRecipeForm.addEventListener('submit', (e) => {
         e.preventDefault();
@@ -3706,13 +3786,13 @@ function initAddRecipeForm() {
     addIngredientRow();
     addInstructionStep();
 
-    // Event listeners for add buttons
-    addIngredientBtn.addEventListener('click', addIngredientRow);
-    addInstructionBtn.addEventListener('click', addInstructionStep);
+    // Event listeners for add buttons (use arrow functions to avoid passing click event as initialValue)
+    addIngredientBtn.addEventListener('click', () => addIngredientRow());
+    addInstructionBtn.addEventListener('click', () => addInstructionStep());
 }
 
 // Add a new ingredient row
-function addIngredientRow() {
+function addIngredientRow(initialValue = '') {
     if (!formIngredientsList) {
         console.error('formIngredientsList not initialized');
         return;
@@ -3722,18 +3802,55 @@ function addIngredientRow() {
     row.className = 'ingredient-row';
     row.dataset.id = ingredientRowCount;
 
+    // Parse initial value - try to extract quantity and unit
+    let qty = '';
+    let unit = '';
+    let name = initialValue;
+
+    if (initialValue) {
+        // Try to match pattern: "2 cups flour", "1/2 tsp salt", "½ cup sugar", or "1-2 tbsp syrup" (ranges)
+        // Include Unicode fractions: ½ ¼ ¾ ⅓ ⅔ ⅛ ⅜ ⅝ ⅞
+        const match = initialValue.match(/^([\d½¼¾⅓⅔⅛⅜⅝⅞\/\.\s\-–]+)?\s*(cups?|tablespoons?|teaspoons?|tbsp|tsp|ounces?|oz|pounds?|lbs?|grams?|g|kg|kilograms?|ml|milliliters?|liters?|l|pinch|dash|cloves?|cans?|pkg|packages?|slices?|pieces?|bunch|head|stalks?)?\s*(.*)$/i);
+        if (match) {
+            qty = (match[1] || '').trim();
+            unit = (match[2] || '').toLowerCase();
+            name = (match[3] || initialValue).trim();
+
+            // Normalize unit names to match dropdown values
+            const unitMap = {
+                'tablespoon': 'tbsp', 'tablespoons': 'tbsp',
+                'teaspoon': 'tsp', 'teaspoons': 'tsp',
+                'ounce': 'oz', 'ounces': 'oz',
+                'pound': 'lb', 'pounds': 'lb', 'lbs': 'lb',
+                'gram': 'g', 'grams': 'g',
+                'kilogram': 'kg', 'kilograms': 'kg',
+                'milliliter': 'ml', 'milliliters': 'ml',
+                'liter': 'l', 'liters': 'l',
+                'clove': 'cloves', 'can': 'cans',
+                'package': 'pkg', 'packages': 'pkg',
+                'slice': 'slices', 'piece': 'pieces',
+                'stalk': 'stalks'
+            };
+            if (unitMap[unit]) {
+                unit = unitMap[unit];
+            }
+            // Handle plural cups -> cup
+            if (unit === 'cups') unit = 'cup';
+        }
+    }
+
     // Build unit options
     const unitOptions = measurementUnits.map(u =>
-        `<option value="${u.value}">${u.label}</option>`
+        `<option value="${u.value}" ${u.value.toLowerCase() === unit ? 'selected' : ''}>${u.label}</option>`
     ).join('');
 
     row.innerHTML = `
-        <input type="text" class="quantity-input" placeholder="Qty" inputmode="decimal">
+        <input type="text" class="quantity-input" placeholder="Qty" inputmode="decimal" value="${qty}">
         <select class="unit-select">
             ${unitOptions}
         </select>
         <div class="ingredient-input">
-            <input type="text" class="ingredient-name" placeholder="Ingredient name" autocomplete="off">
+            <input type="text" class="ingredient-name" placeholder="Ingredient name" autocomplete="off" value="${name.replace(/"/g, '&quot;')}">
         </div>
         <button type="button" class="btn-remove-row" title="Remove ingredient">&times;</button>
     `;
@@ -3829,7 +3946,7 @@ function handleAutocompleteKeydown(e, row) {
 }
 
 // Add a new instruction step
-function addInstructionStep() {
+function addInstructionStep(initialValue = '') {
     if (!formInstructionsList) {
         console.error('formInstructionsList not initialized');
         return;
@@ -3844,7 +3961,7 @@ function addInstructionStep() {
     step.innerHTML = `
         <div class="step-number">${stepNumber}</div>
         <div class="step-content">
-            <textarea placeholder="Describe this step..." rows="2"></textarea>
+            <textarea placeholder="Describe this step..." rows="2">${initialValue.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</textarea>
             <button type="button" class="btn-remove-row" title="Remove step">&times;</button>
         </div>
     `;
@@ -3969,7 +4086,242 @@ function resetAddRecipeForm() {
     hideAllConditionalFields();
 }
 
-// Add new recipe
+// Extract recipe from YouTube video using AI
+async function extractRecipeFromYoutube() {
+    const youtubeUrl = document.getElementById('youtubeUrl').value.trim();
+
+    if (!youtubeUrl) {
+        alert('Please enter a YouTube URL first');
+        return;
+    }
+
+    // Show loading state
+    const btn = document.getElementById('extractYoutubeBtn');
+    const textSpan = btn.querySelector('.extract-text');
+    const loadingSpan = btn.querySelector('.extract-loading');
+
+    btn.disabled = true;
+    textSpan.classList.add('hidden');
+    loadingSpan.classList.remove('hidden');
+
+    try {
+        const response = await apiFetch('/api/youtube/extract', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ youtubeUrl })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(data.error || 'Failed to extract recipe');
+        }
+
+        // Ensure form is initialized
+        if (!formIngredientsList || !formInstructionsList) {
+            initAddRecipeForm();
+        }
+
+        // Populate recipe name
+        if (data.recipe.title) {
+            document.getElementById('recipeName').value = data.recipe.title;
+        }
+
+        // Populate author (channel name)
+        if (data.recipe.author) {
+            document.getElementById('recipeAuthorInput').value = data.recipe.author;
+        }
+
+        // Clear and populate ingredients
+        formIngredientsList.innerHTML = '';
+        ingredientRowCount = 0;
+        if (data.recipe.ingredients && data.recipe.ingredients.length > 0) {
+            data.recipe.ingredients.forEach(ingredient => {
+                addIngredientRow(ingredient);
+            });
+        } else {
+            addIngredientRow();
+        }
+
+        // Clear and populate instructions
+        formInstructionsList.innerHTML = '';
+        instructionStepCount = 0;
+        if (data.recipe.instructions && data.recipe.instructions.length > 0) {
+            data.recipe.instructions.forEach(instruction => {
+                addInstructionStep(instruction);
+            });
+        } else {
+            addInstructionStep();
+        }
+
+        // Set YouTube thumbnail as recipe image
+        if (data.recipe.thumbnailUrl) {
+            uploadedImageUrl = data.recipe.thumbnailUrl;
+            const imagePreview = document.getElementById('imagePreview');
+            const previewImg = document.getElementById('previewImg');
+            if (imagePreview && previewImg) {
+                previewImg.src = data.recipe.thumbnailUrl;
+                imagePreview.classList.remove('hidden');
+            }
+        }
+
+        alert('Recipe extracted! Please review and edit the details before saving.');
+
+    } catch (error) {
+        console.error('Extract error:', error);
+        alert(error.message || 'Failed to extract recipe from video');
+    } finally {
+        // Reset button state
+        btn.disabled = false;
+        textSpan.classList.remove('hidden');
+        loadingSpan.classList.add('hidden');
+    }
+}
+
+// Open edit recipe modal with pre-populated data
+function openEditRecipeModal(recipe) {
+    // Ensure form is initialized
+    if (!formIngredientsList || !formInstructionsList) {
+        initAddRecipeForm();
+    }
+
+    // Set edit mode
+    isEditMode = true;
+    editingRecipeId = recipe.id;
+
+    // Update modal title
+    const modalTitle = addRecipeModal.querySelector('h2');
+    if (modalTitle) {
+        modalTitle.textContent = 'Edit Recipe';
+    }
+
+    // Populate basic fields
+    document.getElementById('recipeName').value = recipe.name || '';
+    document.getElementById('recipeAuthorInput').value = recipe.author || '';
+
+    // Set source type and show relevant fields
+    const sourceType = recipe.source?.type || recipe.source_type || 'manual';
+    document.getElementById('recipeSourceSelect').value = sourceType;
+    hideAllConditionalFields();
+
+    if (sourceType === 'youtube') {
+        document.getElementById('youtubeFields').classList.remove('hidden');
+        document.getElementById('youtubeUrl').value = recipe.source?.youtubeUrl || '';
+    } else if (sourceType === 'cookbook') {
+        document.getElementById('cookbookFields').classList.remove('hidden');
+        document.getElementById('bookName').value = recipe.source?.bookName || '';
+        document.getElementById('amazonLink').value = recipe.source?.amazonLink || '';
+    }
+
+    // Clear and populate ingredients
+    formIngredientsList.innerHTML = '';
+    ingredientRowCount = 0;
+    const ingredients = recipe.ingredients || [];
+    if (ingredients.length > 0) {
+        ingredients.forEach(ingredient => {
+            addIngredientRow(ingredient);
+        });
+    } else {
+        addIngredientRow();
+        addIngredientRow();
+    }
+
+    // Clear and populate instructions
+    formInstructionsList.innerHTML = '';
+    instructionStepCount = 0;
+    const instructions = recipe.instructions || [];
+    if (instructions.length > 0) {
+        instructions.forEach(instruction => {
+            addInstructionStep(instruction);
+        });
+    } else {
+        addInstructionStep();
+    }
+
+    // Set image preview if exists
+    if (recipe.image) {
+        uploadedImageUrl = recipe.image;
+        const imagePreview = document.getElementById('imagePreview');
+        const previewImg = document.getElementById('previewImg');
+        if (imagePreview && previewImg) {
+            previewImg.src = recipe.image;
+            imagePreview.classList.remove('hidden');
+        }
+    }
+
+    // Show modal
+    addRecipeModal.classList.remove('hidden');
+}
+
+// Open modal to fork a recipe
+function openForkRecipeModal(recipe) {
+    // Ensure form is initialized
+    if (!formIngredientsList || !formInstructionsList) {
+        initAddRecipeForm();
+    }
+
+    // Set fork mode (not edit mode - this creates a new recipe)
+    isEditMode = false;
+    editingRecipeId = null;
+    isForkMode = true;
+    forkingFromRecipe = recipe;
+
+    // Update modal title
+    const modalTitle = addRecipeModal.querySelector('h2');
+    if (modalTitle) {
+        modalTitle.textContent = 'Fork Recipe';
+    }
+
+    // Populate basic fields - start with original recipe data
+    document.getElementById('recipeName').value = recipe.name ? `${recipe.name} (Fork)` : '';
+    document.getElementById('recipeAuthorInput').value = currentUser?.displayName || '';
+
+    // Set source type - default to manual for forked recipes
+    document.getElementById('recipeSourceSelect').value = 'manual';
+    hideAllConditionalFields();
+
+    // Clear and populate ingredients from original recipe
+    formIngredientsList.innerHTML = '';
+    ingredientRowCount = 0;
+    const ingredients = recipe.ingredients || [];
+    if (ingredients.length > 0) {
+        ingredients.forEach(ingredient => {
+            addIngredientRow(ingredient);
+        });
+    } else {
+        addIngredientRow();
+        addIngredientRow();
+    }
+
+    // Clear and populate instructions from original recipe
+    formInstructionsList.innerHTML = '';
+    instructionStepCount = 0;
+    const instructions = recipe.instructions || [];
+    if (instructions.length > 0) {
+        instructions.forEach(instruction => {
+            addInstructionStep(instruction);
+        });
+    } else {
+        addInstructionStep();
+    }
+
+    // Clear image - user should add their own for the fork
+    uploadedImageUrl = null;
+    selectedImageFile = null;
+    const imagePreview = document.getElementById('imagePreview');
+    if (imagePreview) {
+        imagePreview.classList.add('hidden');
+    }
+    const imageInput = document.getElementById('recipeImage');
+    if (imageInput) {
+        imageInput.value = '';
+    }
+
+    // Show modal
+    addRecipeModal.classList.remove('hidden');
+}
+
+// Add new recipe or update existing
 async function addNewRecipe() {
     if (!isAuthenticated) {
         alert('Please login to add recipes');
@@ -4017,8 +4369,8 @@ async function addNewRecipe() {
         source.amazonLink = document.getElementById('amazonLink').value;
     }
 
-    // Upload image if selected
-    let imageUrl = null;
+    // Upload image if selected, or use existing uploadedImageUrl (from edit mode or YouTube thumbnail)
+    let imageUrl = uploadedImageUrl || null;
     if (selectedImageFile) {
         try {
             imageUrl = await uploadRecipeImage(selectedImageFile);
@@ -4042,11 +4394,19 @@ async function addNewRecipe() {
         instructions: instructions
     };
 
-    console.log('Submitting recipe:', recipeData);
+    // Add forked_from field if forking a recipe (just the recipe ID - backend will lookup the name)
+    if (isForkMode && forkingFromRecipe) {
+        recipeData.forked_from = forkingFromRecipe.id;
+    }
+
+    console.log(isEditMode ? 'Updating recipe:' : 'Submitting recipe:', recipeData);
 
     try {
-        const response = await apiFetch('/api/recipes', {
-            method: 'POST',
+        const url = isEditMode ? `/api/admin/recipes/${editingRecipeId}` : '/api/recipes';
+        const method = isEditMode ? 'PUT' : 'POST';
+
+        const response = await apiFetch(url, {
+            method: method,
             headers: {
                 'Content-Type': 'application/json'
             },
@@ -4056,8 +4416,33 @@ async function addNewRecipe() {
         const data = await response.json();
 
         if (response.ok) {
-            // Add the new recipe to local array
-            recipes.push(data.recipe);
+            const recipeId = isEditMode ? editingRecipeId : data.recipe.id;
+
+            if (isEditMode) {
+                // Clear all caches to ensure fresh data is fetched
+                clearCache();
+
+                // Update the recipe in local arrays with full data from response
+                const updatedRecipe = { ...recipeData, id: editingRecipeId, source: source };
+                const recipeIndex = recipes.findIndex(r => r.id === editingRecipeId);
+                if (recipeIndex !== -1) {
+                    recipes[recipeIndex] = { ...recipes[recipeIndex], ...updatedRecipe };
+                }
+                const allRecipeIndex = allRecipes.findIndex(r => r.id === editingRecipeId);
+                if (allRecipeIndex !== -1) {
+                    allRecipes[allRecipeIndex] = { ...allRecipes[allRecipeIndex], ...updatedRecipe };
+                }
+                // Clear currentRecipe so it will be refetched
+                currentRecipe = null;
+            } else {
+                // Add the new recipe to local array
+                // Transform source_data to source for frontend compatibility
+                const newRecipe = { ...data.recipe };
+                if (newRecipe.source_data) {
+                    newRecipe.source = newRecipe.source_data;
+                }
+                recipes.push(newRecipe);
+            }
 
             // Clear search and update filtered list
             searchInput.value = '';
@@ -4065,19 +4450,45 @@ async function addNewRecipe() {
             filteredRecipes = [];
             searchClearBtn.classList.remove('visible');
 
-            renderRecipeList();
-            renderRandomRecipes();
-            showRecipe(data.recipe.id);
+            // Reset edit mode and fork mode before rendering
+            const wasEditMode = isEditMode;
+            isEditMode = false;
+            editingRecipeId = null;
+            isForkMode = false;
+            forkingFromRecipe = null;
 
             addRecipeModal.classList.add('hidden');
             resetAddRecipeForm();
             hideAllConditionalFields();
+
+            renderRecipeList();
+            renderRandomRecipes();
+
+            // Force fetch fresh recipe data from API
+            if (wasEditMode) {
+                // Fetch fresh data directly from API
+                try {
+                    const freshResponse = await fetch(`/api/recipes/${recipeId}`);
+                    if (freshResponse.ok) {
+                        const freshData = await freshResponse.json();
+                        currentRecipe = freshData.recipe;
+                        if (currentRecipe.source_data) {
+                            currentRecipe.source = currentRecipe.source_data;
+                        }
+                    }
+                } catch (e) {
+                    console.error('Error fetching fresh recipe:', e);
+                }
+            }
+
+            // Show the recipe
+            showRecipeById(recipeId, false);
         } else {
-            alert(data.error || 'Failed to add recipe');
+            alert(data.error || (isEditMode ? 'Failed to update recipe' : 'Failed to add recipe'));
         }
     } catch (error) {
-        console.error('Error adding recipe:', error);
-        alert('An error occurred while adding the recipe');
+        console.error(isEditMode ? 'Error updating recipe:' : 'Error adding recipe:', error);
+        alert(isEditMode ? 'An error occurred while updating the recipe' : 'An error occurred while adding the recipe');
     }
 }
 

@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Recipe Collection</title>
     <base href="/">
-    <link rel="stylesheet" href="/styles.css?v=26">
+    <link rel="stylesheet" href="/styles.css?v=29">
 </head>
 
 <body>
@@ -67,12 +67,20 @@
                         <h1 id="recipeTitle"></h1>
                         <p class="recipe-author" id="recipeAuthor"></p>
                         <p class="recipe-source" id="recipeSource"></p>
+                        <p class="recipe-forked-from hidden" id="recipeForkedFrom"></p>
                         <div class="recipe-rating-display" id="recipeRatingDisplay">
                             <div class="stars" id="recipeStars"></div>
                             <span class="rating-text" id="ratingText"></span>
                         </div>
                     </div>
                     <div class="recipe-actions">
+                        <button class="fork-recipe-btn hidden" id="forkRecipeBtn">
+                            <svg class="fork-icon" viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+                                <path d="M3 2v6c0 1.1.9 2 2 2h4v12h2V10h4c1.1 0 2-.9 2-2V2h-2v6H9V2H7v6H5V2H3z"/>
+                            </svg>
+                            Fork Recipe
+                        </button>
+                        <button class="edit-recipe-btn hidden" id="editRecipeBtn">Edit Recipe</button>
                         <button class="add-to-folder-btn hidden" id="addToFolderBtn">Add to Folder</button>
                         <button class="reset-btn" id="resetBtn">Reset Progress</button>
                     </div>
@@ -414,7 +422,14 @@
                     <div id="youtubeFields" class="conditional-field hidden">
                         <div class="form-field">
                             <label for="youtubeUrl">YouTube URL</label>
-                            <input type="url" id="youtubeUrl" placeholder="https://www.youtube.com/watch?v=...">
+                            <div class="youtube-url-row">
+                                <input type="url" id="youtubeUrl" placeholder="https://www.youtube.com/watch?v=...">
+                                <button type="button" id="extractYoutubeBtn" class="extract-btn">
+                                    <span class="extract-text">Extract Recipe</span>
+                                    <span class="extract-loading hidden">Extracting...</span>
+                                </button>
+                            </div>
+                            <p class="field-hint">Paste a cooking video URL and click Extract to auto-fill ingredients and instructions</p>
                         </div>
                     </div>
 
@@ -638,7 +653,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-storage-compat.js"></script>
     <script src="/__/firebase/init.js"></script>
-    <script src="/script.js?v=36"></script>
+    <script src="/script.js?v=39"></script>
 </body>
 
 </html>

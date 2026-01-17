@@ -6,6 +6,8 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const nodemailer = require('nodemailer');
 const crypto = require('crypto');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
+const { YoutubeTranscript } = require('youtube-transcript');
 
 // Initialize Firebase Admin
 // When running locally, connect to emulators if FIRESTORE_EMULATOR_HOST is set
@@ -53,6 +55,15 @@ if (process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD) {
     console.log('⚠️  No Gmail credentials. Emails will be logged.');
 }
 
+// Initialize Google Gemini AI
+let genAI = null;
+if (process.env.GEMINI_API_KEY) {
+    genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+    console.log('Gemini AI initialized');
+} else {
+    console.log('⚠️  No Gemini API key. YouTube extraction will not work.');
+}
+
 // ============================================
 // FIRESTORE COLLECTIONS
 // ============================================
@@ -82,6 +93,24 @@ async function requireAuth(req, res, next) {
         console.error('Error verifying ID token:', error);
         return res.status(401).json({ error: 'Unauthorized - Invalid token' });
     }
+}
+
+// Optional auth middleware - parses token if present but doesn't require it
+async function optionalAuth(req, res, next) {
+    const authHeader = req.headers.authorization;
+
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+        const idToken = authHeader.split('Bearer ')[1];
+        try {
+            const decodedToken = await admin.auth().verifyIdToken(idToken);
+            req.user = decodedToken;
+            req.userId = decodedToken.uid;
+        } catch (error) {
+            // Token invalid, but that's okay - just continue without user info
+            console.log('Optional auth: invalid token');
+        }
+    }
+    next();
 }
 
 // Admin middleware - check if user is in admin email whitelist
@@ -460,9 +489,257 @@ app.get('/api/recipes', requireAuth, async (req, res) => {
     }
 });
 
+// Helper function to check for URLs in text (spam prevention)
+function containsUrl(text) {
+    if (!text) return false;
+    // Match common URL patterns
+    const urlPattern = /(?:https?:\/\/|www\.)[^\s]+|[a-zA-Z0-9][-a-zA-Z0-9]*\.[a-zA-Z]{2,}(?:\/[^\s]*)?/gi;
+    return urlPattern.test(text);
+}
+
+// Helper function to validate ingredients and instructions for spam
+function validateRecipeContent(ingredients, instructions) {
+    // Check ingredients for URLs
+    for (const ingredient of ingredients) {
+        if (containsUrl(ingredient)) {
+            return { valid: false, error: 'URLs are not allowed in ingredients' };
+        }
+    }
+    // Check instructions for URLs
+    for (const instruction of instructions) {
+        if (containsUrl(instruction)) {
+            return { valid: false, error: 'URLs are not allowed in instructions' };
+        }
+    }
+    return { valid: true };
+}
+
+// Helper function to extract YouTube video ID from URL
+function getYouTubeVideoId(url) {
+    const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/;
+    const match = url.match(regExp);
+    return (match && match[2].length === 11) ? match[2] : null;
+}
+
+// ============================================
+// YOUTUBE RECIPE EXTRACTION
+// ============================================
+
+// Helper function to fetch YouTube video description
+async function fetchYouTubeDescription(videoId) {
+    try {
+        console.log('Fetching YouTube page for video:', videoId);
+        const response = await fetch(`https://www.youtube.com/watch?v=${videoId}`, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                'Accept-Language': 'en-US,en;q=0.9'
+            }
+        });
+
+        if (!response.ok) {
+            console.error('YouTube fetch failed with status:', response.status);
+            return null;
+        }
+
+        const html = await response.text();
+        console.log('YouTube page fetched, length:', html.length);
+
+        // Try to extract description from the page's JSON data
+        // YouTube embeds video data in a script tag as ytInitialPlayerResponse
+        const playerResponseMatch = html.match(/var ytInitialPlayerResponse\s*=\s*({.+?});/s);
+        if (playerResponseMatch) {
+            try {
+                const playerData = JSON.parse(playerResponseMatch[1]);
+                const description = playerData?.videoDetails?.shortDescription;
+                const title = playerData?.videoDetails?.title;
+                const channelName = playerData?.videoDetails?.author;
+                console.log('Found description via ytInitialPlayerResponse, length:', description?.length || 0);
+                console.log('Channel name:', channelName);
+                if (description) {
+                    return { title, description, channelName };
+                }
+            } catch (parseError) {
+                console.error('Error parsing ytInitialPlayerResponse:', parseError.message);
+            }
+        }
+
+        // Fallback: try ytInitialData
+        const initialDataMatch = html.match(/var ytInitialData\s*=\s*({.+?});/s);
+        if (initialDataMatch) {
+            try {
+                const initialData = JSON.parse(initialDataMatch[1]);
+                // Navigate to find description in the data structure
+                const contents = initialData?.contents?.twoColumnWatchNextResults?.results?.results?.contents;
+                if (contents) {
+                    for (const content of contents) {
+                        const description = content?.videoSecondaryInfoRenderer?.attributedDescription?.content;
+                        if (description) {
+                            console.log('Found description via ytInitialData, length:', description.length);
+                            return { title: null, description };
+                        }
+                    }
+                }
+            } catch (parseError) {
+                console.error('Error parsing ytInitialData:', parseError.message);
+            }
+        }
+
+        console.log('Could not find description in YouTube page');
+        return null;
+    } catch (e) {
+        console.error('Error fetching YouTube description:', e.message, e.stack);
+        return null;
+    }
+}
+
+// Extract recipe from YouTube video using Gemini AI
+app.post('/api/youtube/extract', requireAuth, async (req, res) => {
+    try {
+        const { youtubeUrl } = req.body;
+
+        if (!youtubeUrl) {
+            return res.status(400).json({ error: 'YouTube URL is required' });
+        }
+
+        if (!genAI) {
+            return res.status(500).json({ error: 'AI service not configured. Please contact administrator.' });
+        }
+
+        // Extract video ID
+        const videoId = getYouTubeVideoId(youtubeUrl);
+        if (!videoId) {
+            return res.status(400).json({ error: 'Invalid YouTube URL' });
+        }
+
+        // Fetch transcript - try multiple language options
+        let transcript = '';
+        let transcriptError = null;
+        let contentSource = 'transcript';
+
+        // Try to fetch transcript with different language preferences
+        const languageOptions = [
+            undefined,  // Default (auto-detect)
+            { lang: 'en' },
+            { lang: 'en-US' },
+            { lang: 'en-GB' },
+        ];
+
+        for (const langOption of languageOptions) {
+            try {
+                const transcriptData = await YoutubeTranscript.fetchTranscript(videoId, langOption);
+                if (transcriptData && transcriptData.length > 0) {
+                    transcript = transcriptData.map(item => item.text).join(' ');
+                    break;
+                }
+            } catch (e) {
+                transcriptError = e;
+                console.log(`Transcript fetch failed with option ${JSON.stringify(langOption)}: ${e.message}`);
+                continue;
+            }
+        }
+
+        // Fetch video info (title, description, channel name)
+        let videoTitle = '';
+        let channelName = '';
+        const videoInfo = await fetchYouTubeDescription(videoId);
+        if (videoInfo) {
+            videoTitle = videoInfo.title || '';
+            channelName = videoInfo.channelName || '';
+
+            // If no transcript, try to use video description
+            if (!transcript || transcript.trim().length < 100) {
+                console.log('No transcript available, trying video description...');
+                if (videoInfo.description && videoInfo.description.length > 50) {
+                    transcript = videoInfo.description;
+                    contentSource = 'description';
+                    console.log('Using video description instead of transcript');
+                }
+            }
+        }
+
+        if (!transcript || transcript.trim().length < 50) {
+            return res.status(400).json({
+                error: 'Could not extract content from this video. The video has no captions and the description does not contain recipe information.'
+            });
+        }
+
+        // Call Gemini AI to extract recipe
+        const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+
+        const contextType = contentSource === 'description' ? 'video description' : 'video transcript';
+        const prompt = `Analyze this cooking ${contextType} and extract the recipe information.
+
+${contentSource === 'description' && videoTitle ? `Video Title: ${videoTitle}\n\n` : ''}${contextType.charAt(0).toUpperCase() + contextType.slice(1)}:
+${transcript.substring(0, 30000)}
+
+Extract and return ONLY a JSON object with this exact structure (no markdown, no explanation, no code blocks):
+{
+    "title": "Recipe name",
+    "ingredients": ["1 cup flour", "2 eggs", ...],
+    "instructions": ["Preheat oven to 350°F", "Mix dry ingredients", ...]
+}
+
+Rules:
+- Ingredients should include quantities and units when mentioned
+- Instructions should be clear, actionable steps
+- If the content doesn't contain a clear recipe, return {"error": "No recipe found in this video"}`;
+
+        console.log(`Sending ${transcript.length} chars to Gemini (source: ${contentSource})`);
+
+        let result;
+        try {
+            result = await model.generateContent(prompt);
+        } catch (aiError) {
+            console.error('Gemini API error:', aiError.message);
+            return res.status(500).json({ error: 'AI service error: ' + aiError.message });
+        }
+
+        const responseText = result.response.text();
+        console.log('Gemini response:', responseText.substring(0, 500));
+
+        // Parse JSON from response
+        let recipeData;
+        try {
+            // Handle potential markdown code blocks in response
+            const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+            recipeData = JSON.parse(jsonMatch ? jsonMatch[0] : responseText);
+        } catch (e) {
+            console.error('JSON parse error:', e.message, 'Response:', responseText.substring(0, 500));
+            return res.status(500).json({ error: 'Failed to parse AI response. Please try again.' });
+        }
+
+        if (recipeData.error) {
+            return res.status(400).json({ error: recipeData.error });
+        }
+
+        // Generate YouTube thumbnail URL
+        const thumbnailUrl = `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
+
+        res.json({
+            success: true,
+            recipe: {
+                title: recipeData.title || videoTitle || '',
+                author: channelName || '',
+                ingredients: recipeData.ingredients || [],
+                instructions: recipeData.instructions || [],
+                youtubeUrl: youtubeUrl,
+                thumbnailUrl: thumbnailUrl,
+                videoId: videoId
+            }
+        });
+    } catch (error) {
+        console.error('YouTube extraction error:', error.message, error.stack);
+        res.status(500).json({ error: 'Failed to extract recipe from video. Please try again.' });
+    }
+});
+
+// ============================================
+// RECIPE CRUD OPERATIONS
+// ============================================
+
 app.post('/api/recipes', requireAuth, async (req, res) => {
     try {
-        const { name, author, image, source, ingredients, instructions } = req.body;
+        const { name, author, image, source, ingredients, instructions, forked_from } = req.body;
         const userId = req.userId;
 
         // Validate required fields
@@ -472,6 +749,32 @@ app.post('/api/recipes', requireAuth, async (req, res) => {
 
         if (!source || !source.type) {
             return res.status(400).json({ error: 'Missing source type' });
+        }
+
+        // Validate content for spam (URLs in ingredients/instructions)
+        const contentValidation = validateRecipeContent(
+            Array.isArray(ingredients) ? ingredients : [],
+            Array.isArray(instructions) ? instructions : []
+        );
+        if (!contentValidation.valid) {
+            return res.status(400).json({ error: contentValidation.error });
+        }
+
+        // If forking, validate the source recipe exists and is approved
+        let forkedFromData = null;
+        if (forked_from) {
+            const sourceRecipe = await db.collection('recipes').doc(forked_from).get();
+            if (!sourceRecipe.exists) {
+                return res.status(400).json({ error: 'Source recipe not found' });
+            }
+            const sourceData = sourceRecipe.data();
+            if (sourceData.status !== 'approved') {
+                return res.status(400).json({ error: 'Can only fork approved recipes' });
+            }
+            forkedFromData = {
+                recipe_id: forked_from,
+                recipe_name: sourceData.name
+            };
         }
 
         // Determine recipe status based on user type
@@ -492,6 +795,11 @@ app.post('/api/recipes', requireAuth, async (req, res) => {
             created_at: admin.firestore.FieldValue.serverTimestamp()
         };
 
+        // Add forked_from data if this is a fork
+        if (forkedFromData) {
+            recipeData.forked_from = forkedFromData;
+        }
+
         const recipeRef = await db.collection('recipes').add(recipeData);
 
         res.json({
@@ -505,6 +813,55 @@ app.post('/api/recipes', requireAuth, async (req, res) => {
     } catch (error) {
         console.error('Error saving recipe:', error.message, error.stack);
         res.status(500).json({ error: 'Error saving recipe: ' + error.message });
+    }
+});
+
+// Update recipe (admin only)
+app.put('/api/admin/recipes/:id', requireAuth, requireAdmin, async (req, res) => {
+    try {
+        const recipeId = req.params.id;
+        const { name, author, image, source, ingredients, instructions, status } = req.body;
+
+        // Validate required fields
+        if (!name || !ingredients || !instructions) {
+            return res.status(400).json({ error: 'Missing required fields: name, ingredients, or instructions' });
+        }
+
+        const recipeDoc = await db.collection('recipes').doc(recipeId).get();
+        if (!recipeDoc.exists) {
+            return res.status(404).json({ error: 'Recipe not found' });
+        }
+
+        const updateData = {
+            name,
+            author: author || '',
+            image: image || null,
+            source_type: source?.type || 'manual',
+            source_data: source || { type: 'manual' },
+            ingredients: Array.isArray(ingredients) ? ingredients : [],
+            instructions: Array.isArray(instructions) ? instructions : [],
+            updated_at: admin.firestore.FieldValue.serverTimestamp(),
+            updated_by: req.userId
+        };
+
+        // Allow admin to update status if provided
+        if (status && ['pending', 'approved', 'declined'].includes(status)) {
+            updateData.status = status;
+        }
+
+        await db.collection('recipes').doc(recipeId).update(updateData);
+
+        res.json({
+            success: true,
+            recipe: {
+                id: recipeId,
+                ...updateData,
+                updated_at: new Date().toISOString()
+            }
+        });
+    } catch (error) {
+        console.error('Error updating recipe:', error);
+        res.status(500).json({ error: 'Error updating recipe' });
     }
 });
 
@@ -552,7 +909,7 @@ app.get('/api/recipes/:id', async (req, res) => {
 // RATING ROUTES
 // ============================================
 
-app.get('/api/recipes/:id/rating', async (req, res) => {
+app.get('/api/recipes/:id/rating', optionalAuth, async (req, res) => {
     try {
         const recipeId = req.params.id;
         const userId = req.userId;
