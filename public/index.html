@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Recipe Collection</title>
     <base href="/">
-    <link rel="stylesheet" href="/styles.css?v=29">
+    <link rel="stylesheet" href="/styles.css?v=30">
 </head>
 
 <body>
@@ -295,6 +295,66 @@
                                 </div>
                                 <p id="bulkProgressText">0 of 0 recipes uploaded</p>
                                 <div id="bulkUploadLog" class="upload-log"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- YouTube Channel Import Section -->
+                    <div class="admin-youtube-import-section">
+                        <div class="youtube-import-header">
+                            <h2>Import from YouTube Channel</h2>
+                            <button type="button" id="toggleYoutubeImport" class="btn-secondary">Show Import</button>
+                        </div>
+                        <div id="youtubeImportContent" class="youtube-import-content hidden">
+                            <!-- Channel Search -->
+                            <div class="channel-search-container">
+                                <div class="channel-search-row">
+                                    <input type="text" id="channelSearchInput" placeholder="Search for a YouTube channel (e.g., Tasty, Bon Appetit)...">
+                                    <button type="button" id="searchChannelBtn" class="btn-primary">Search</button>
+                                </div>
+                                <p class="field-hint">Search for cooking channels to import their recipes</p>
+                            </div>
+
+                            <!-- Channel Results -->
+                            <div id="channelResults" class="channel-results hidden">
+                                <h3>Select a Channel</h3>
+                                <div class="channel-cards" id="channelCards">
+                                    <!-- Channel cards will be inserted here -->
+                                </div>
+                            </div>
+
+                            <!-- Video List -->
+                            <div id="channelVideos" class="channel-videos hidden">
+                                <div class="video-list-header">
+                                    <div class="video-list-title">
+                                        <button type="button" id="backToChannelsBtn" class="btn-back">&larr; Back</button>
+                                        <h3 id="selectedChannelName"></h3>
+                                    </div>
+                                    <div class="video-selection-controls">
+                                        <label class="select-all-label">
+                                            <input type="checkbox" id="selectAllVideos">
+                                            Select All
+                                        </label>
+                                        <button type="button" id="extractSelectedBtn" class="btn-primary" disabled>
+                                            Extract Selected (<span id="selectedCount">0</span>)
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="video-grid" id="videoGrid">
+                                    <!-- Video cards with checkboxes will be inserted here -->
+                                </div>
+                            </div>
+
+                            <!-- Extraction Progress -->
+                            <div id="extractionProgress" class="extraction-progress hidden">
+                                <h3>Extracting Recipes</h3>
+                                <div class="extraction-progress-bar">
+                                    <div class="extraction-progress-fill" id="extractionProgressFill"></div>
+                                </div>
+                                <p class="extraction-progress-text" id="extractionProgressText">Extracting 0 of 0...</p>
+                                <div class="extraction-results" id="extractionResults">
+                                    <!-- Results will be shown here -->
+                                </div>
                             </div>
                         </div>
                     </div>

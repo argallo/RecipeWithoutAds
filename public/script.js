@@ -2652,6 +2652,355 @@ function addLogEntry(logContainer, message, type) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// YouTube Channel Import Functions
+// ═══════════════════════════════════════════════════════════════════════════
+
+let youtubeChannels = [];
+let youtubeVideos = [];
+let selectedChannelName = '';
+let selectedVideos = new Set();
+
+function setupYoutubeImportEventListeners() {
+    const toggleBtn = document.getElementById('toggleYoutubeImport');
+    const importContent = document.getElementById('youtubeImportContent');
+    const searchBtn = document.getElementById('searchChannelBtn');
+    const searchInput = document.getElementById('channelSearchInput');
+    const backBtn = document.getElementById('backToChannelsBtn');
+    const selectAllCheckbox = document.getElementById('selectAllVideos');
+    const extractBtn = document.getElementById('extractSelectedBtn');
+
+    if (!toggleBtn) return; // Not on admin page
+
+    // Toggle import section
+    toggleBtn.addEventListener('click', () => {
+        importContent.classList.toggle('hidden');
+        toggleBtn.textContent = importContent.classList.contains('hidden') ? 'Show Import' : 'Hide Import';
+    });
+
+    // Search channels
+    searchBtn.addEventListener('click', searchYouTubeChannels);
+    searchInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            searchYouTubeChannels();
+        }
+    });
+
+    // Back to channels button
+    backBtn.addEventListener('click', showChannelResults);
+
+    // Select all checkbox
+    selectAllCheckbox.addEventListener('change', toggleSelectAllVideos);
+
+    // Extract selected videos
+    extractBtn.addEventListener('click', extractSelectedVideos);
+}
+
+async function searchYouTubeChannels() {
+    const searchInput = document.getElementById('channelSearchInput');
+    const channelResults = document.getElementById('channelResults');
+    const channelCards = document.getElementById('channelCards');
+    const channelVideos = document.getElementById('channelVideos');
+    const searchBtn = document.getElementById('searchChannelBtn');
+
+    const query = searchInput.value.trim();
+    if (!query || query.length < 2) {
+        alert('Please enter at least 2 characters to search');
+        return;
+    }
+
+    // Show loading state
+    searchBtn.disabled = true;
+    searchBtn.textContent = 'Searching...';
+    channelResults.classList.add('hidden');
+    channelVideos.classList.add('hidden');
+
+    try {
+        const response = await apiFetch(`/api/admin/youtube/search-channel?q=${encodeURIComponent(query)}`);
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Search failed');
+        }
+
+        const data = await response.json();
+        youtubeChannels = data.channels || [];
+
+        if (youtubeChannels.length === 0) {
+            channelCards.innerHTML = '<p class="no-results">No channels found. Try a different search.</p>';
+        } else {
+            renderChannelCards();
+        }
+
+        channelResults.classList.remove('hidden');
+    } catch (error) {
+        console.error('Error searching channels:', error);
+        alert('Error searching channels: ' + error.message);
+    } finally {
+        searchBtn.disabled = false;
+        searchBtn.textContent = 'Search';
+    }
+}
+
+function renderChannelCards() {
+    const channelCards = document.getElementById('channelCards');
+    channelCards.innerHTML = '';
+
+    youtubeChannels.forEach(channel => {
+        const card = document.createElement('div');
+        card.className = 'channel-card';
+        card.innerHTML = `
+            <img src="${channel.thumbnail}" alt="${escapeHtml(channel.title)}" class="channel-thumbnail">
+            <div class="channel-info">
+                <h4 class="channel-title">${escapeHtml(channel.title)}</h4>
+                <p class="channel-meta">${escapeHtml(channel.subscriberCount || '')} ${channel.videoCount ? `• ${channel.videoCount}` : ''}</p>
+            </div>
+        `;
+        card.addEventListener('click', () => loadChannelVideos(channel.channelId, channel.title));
+        channelCards.appendChild(card);
+    });
+}
+
+async function loadChannelVideos(channelId, channelName) {
+    const channelResults = document.getElementById('channelResults');
+    const channelVideos = document.getElementById('channelVideos');
+    const selectedChannelNameEl = document.getElementById('selectedChannelName');
+    const videoGrid = document.getElementById('videoGrid');
+    const selectAllCheckbox = document.getElementById('selectAllVideos');
+
+    selectedChannelName = channelName;
+    selectedChannelNameEl.textContent = channelName;
+    selectedVideos.clear();
+    selectAllCheckbox.checked = false;
+    updateSelectedCount();
+
+    // Show loading state
+    channelResults.classList.add('hidden');
+    channelVideos.classList.remove('hidden');
+    videoGrid.innerHTML = '<p class="loading-text">Loading videos...</p>';
+
+    try {
+        const response = await apiFetch(`/api/admin/youtube/channel-videos?channelId=${encodeURIComponent(channelId)}`);
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to load videos');
+        }
+
+        const data = await response.json();
+        youtubeVideos = data.videos || [];
+
+        if (youtubeVideos.length === 0) {
+            videoGrid.innerHTML = '<p class="no-results">No videos found for this channel.</p>';
+        } else {
+            renderVideoGrid();
+        }
+    } catch (error) {
+        console.error('Error loading channel videos:', error);
+        videoGrid.innerHTML = `<p class="error-text">Error: ${error.message}</p>`;
+    }
+}
+
+function renderVideoGrid() {
+    const videoGrid = document.getElementById('videoGrid');
+    videoGrid.innerHTML = '';
+
+    youtubeVideos.forEach(video => {
+        const card = document.createElement('div');
+        card.className = 'video-card';
+        card.dataset.videoId = video.videoId;
+
+        if (selectedVideos.has(video.videoId)) {
+            card.classList.add('selected');
+        }
+
+        card.innerHTML = `
+            <div class="video-checkbox-wrapper">
+                <input type="checkbox" class="video-checkbox" data-video-id="${video.videoId}" ${selectedVideos.has(video.videoId) ? 'checked' : ''}>
+            </div>
+            <img src="${video.thumbnail}" alt="${escapeHtml(video.title)}" class="video-thumbnail">
+            <div class="video-info">
+                <h5 class="video-title" title="${escapeHtml(video.title)}">${escapeHtml(video.title)}</h5>
+                <p class="video-meta">${escapeHtml(video.duration || '')} ${video.viewCount ? `• ${video.viewCount}` : ''}</p>
+                ${video.publishedTime ? `<p class="video-published">${escapeHtml(video.publishedTime)}</p>` : ''}
+            </div>
+        `;
+
+        // Click on card (not checkbox) toggles selection
+        card.addEventListener('click', (e) => {
+            if (e.target.classList.contains('video-checkbox')) return;
+            toggleVideoSelection(video.videoId);
+        });
+
+        // Checkbox click
+        const checkbox = card.querySelector('.video-checkbox');
+        checkbox.addEventListener('change', () => {
+            toggleVideoSelection(video.videoId);
+        });
+
+        videoGrid.appendChild(card);
+    });
+}
+
+function toggleVideoSelection(videoId) {
+    if (selectedVideos.has(videoId)) {
+        selectedVideos.delete(videoId);
+    } else {
+        if (selectedVideos.size >= 20) {
+            alert('Maximum 20 videos can be selected at once');
+            return;
+        }
+        selectedVideos.add(videoId);
+    }
+
+    // Update UI
+    const card = document.querySelector(`.video-card[data-video-id="${videoId}"]`);
+    const checkbox = card?.querySelector('.video-checkbox');
+    if (card) {
+        card.classList.toggle('selected', selectedVideos.has(videoId));
+    }
+    if (checkbox) {
+        checkbox.checked = selectedVideos.has(videoId);
+    }
+
+    updateSelectedCount();
+    updateSelectAllState();
+}
+
+function toggleSelectAllVideos() {
+    const selectAllCheckbox = document.getElementById('selectAllVideos');
+    const isChecked = selectAllCheckbox.checked;
+
+    if (isChecked) {
+        // Select all (up to 20)
+        selectedVideos.clear();
+        youtubeVideos.slice(0, 20).forEach(video => {
+            selectedVideos.add(video.videoId);
+        });
+    } else {
+        // Deselect all
+        selectedVideos.clear();
+    }
+
+    renderVideoGrid();
+    updateSelectedCount();
+}
+
+function updateSelectAllState() {
+    const selectAllCheckbox = document.getElementById('selectAllVideos');
+    const maxSelectable = Math.min(youtubeVideos.length, 20);
+    selectAllCheckbox.checked = selectedVideos.size === maxSelectable;
+    selectAllCheckbox.indeterminate = selectedVideos.size > 0 && selectedVideos.size < maxSelectable;
+}
+
+function updateSelectedCount() {
+    const countEl = document.getElementById('selectedCount');
+    const extractBtn = document.getElementById('extractSelectedBtn');
+    countEl.textContent = selectedVideos.size;
+    extractBtn.disabled = selectedVideos.size === 0;
+}
+
+function showChannelResults() {
+    const channelResults = document.getElementById('channelResults');
+    const channelVideos = document.getElementById('channelVideos');
+    const extractionProgress = document.getElementById('extractionProgress');
+
+    channelVideos.classList.add('hidden');
+    extractionProgress.classList.add('hidden');
+    channelResults.classList.remove('hidden');
+}
+
+async function extractSelectedVideos() {
+    if (selectedVideos.size === 0) {
+        alert('Please select at least one video');
+        return;
+    }
+
+    const channelVideos = document.getElementById('channelVideos');
+    const extractionProgress = document.getElementById('extractionProgress');
+    const progressFill = document.getElementById('extractionProgressFill');
+    const progressText = document.getElementById('extractionProgressText');
+    const resultsContainer = document.getElementById('extractionResults');
+    const extractBtn = document.getElementById('extractSelectedBtn');
+
+    // Prepare videos array with details
+    const videosToExtract = youtubeVideos
+        .filter(v => selectedVideos.has(v.videoId))
+        .map(v => ({ videoId: v.videoId, title: v.title }));
+
+    // Show progress UI
+    channelVideos.classList.add('hidden');
+    extractionProgress.classList.remove('hidden');
+    progressFill.style.width = '0%';
+    progressText.textContent = `Extracting 0 of ${videosToExtract.length}...`;
+    resultsContainer.innerHTML = '';
+    extractBtn.disabled = true;
+
+    try {
+        const response = await apiFetch('/api/admin/youtube/bulk-extract', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                videos: videosToExtract,
+                channelName: selectedChannelName
+            })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(data.error || 'Extraction failed');
+        }
+
+        // Update progress to complete
+        progressFill.style.width = '100%';
+        progressText.textContent = `Extraction complete!`;
+
+        // Show results
+        renderExtractionResults(data.results, data.summary);
+
+        // Refresh admin stats
+        await loadAdminStats();
+
+    } catch (error) {
+        console.error('Extraction error:', error);
+        progressText.textContent = 'Extraction failed';
+        resultsContainer.innerHTML = `<div class="extraction-error">Error: ${error.message}</div>`;
+    } finally {
+        extractBtn.disabled = false;
+    }
+}
+
+function renderExtractionResults(results, summary) {
+    const resultsContainer = document.getElementById('extractionResults');
+
+    let html = `
+        <div class="extraction-summary">
+            <span class="summary-success">${summary.successful} succeeded</span>
+            <span class="summary-failed">${summary.failed} failed</span>
+        </div>
+    `;
+
+    if (results.success.length > 0) {
+        html += '<div class="extraction-success-list"><h4>Successfully Extracted:</h4><ul>';
+        results.success.forEach(item => {
+            html += `<li><a href="/recipe/${generateSlug(item.title)}-${item.recipeId}" target="_blank">${escapeHtml(item.title)}</a></li>`;
+        });
+        html += '</ul></div>';
+    }
+
+    if (results.failed.length > 0) {
+        html += '<div class="extraction-failed-list"><h4>Failed:</h4><ul>';
+        results.failed.forEach(item => {
+            html += `<li><strong>${escapeHtml(item.title || item.videoId)}</strong>: ${escapeHtml(item.error)}</li>`;
+        });
+        html += '</ul></div>';
+    }
+
+    html += `<button type="button" class="btn-secondary" onclick="showChannelResults()">Back to Videos</button>`;
+
+    resultsContainer.innerHTML = html;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 
 async function loadCookingActivity() {
     try {
@@ -2832,6 +3181,7 @@ async function init() {
     setupEventListeners();
     setupRatingEventListeners();
     setupAdminEventListeners();
+    setupYoutubeImportEventListeners();
     initAddRecipeForm();
     initImageUpload();
 

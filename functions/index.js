@@ -734,6 +734,362 @@ Rules:
 });
 
 // ============================================
+// ADMIN: YOUTUBE CHANNEL BULK IMPORT
+// ============================================
+
+// Helper function to search YouTube for channels
+async function searchYouTubeChannels(query) {
+    try {
+        const searchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}&sp=EgIQAg%3D%3D`;
+        const response = await fetch(searchUrl, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                'Accept-Language': 'en-US,en;q=0.9'
+            }
+        });
+
+        if (!response.ok) {
+            console.error('YouTube search failed with status:', response.status);
+            return [];
+        }
+
+        const html = await response.text();
+
+        // Extract ytInitialData from the page
+        const initialDataMatch = html.match(/var ytInitialData\s*=\s*({.+?});/s);
+        if (!initialDataMatch) {
+            console.error('Could not find ytInitialData in search results');
+            return [];
+        }
+
+        const initialData = JSON.parse(initialDataMatch[1]);
+        const contents = initialData?.contents?.twoColumnSearchResultsRenderer?.primaryContents?.sectionListRenderer?.contents;
+
+        if (!contents) {
+            console.error('Could not find search contents in ytInitialData');
+            return [];
+        }
+
+        const channels = [];
+
+        for (const section of contents) {
+            const items = section?.itemSectionRenderer?.contents;
+            if (!items) continue;
+
+            for (const item of items) {
+                const channelRenderer = item?.channelRenderer;
+                if (!channelRenderer) continue;
+
+                const channelId = channelRenderer.channelId;
+                const title = channelRenderer.title?.simpleText || '';
+                const thumbnail = channelRenderer.thumbnail?.thumbnails?.[0]?.url || '';
+                const subscriberCount = channelRenderer.subscriberCountText?.simpleText || '';
+                const videoCount = channelRenderer.videoCountText?.simpleText || '';
+
+                if (channelId && title) {
+                    channels.push({
+                        channelId,
+                        title,
+                        thumbnail: thumbnail.startsWith('//') ? 'https:' + thumbnail : thumbnail,
+                        subscriberCount,
+                        videoCount
+                    });
+                }
+            }
+        }
+
+        return channels;
+    } catch (error) {
+        console.error('Error searching YouTube channels:', error);
+        return [];
+    }
+}
+
+// Helper function to get videos from a YouTube channel
+async function getChannelVideos(channelId, maxResults = 30) {
+    try {
+        // Fetch channel's videos page
+        const channelUrl = `https://www.youtube.com/channel/${channelId}/videos`;
+        const response = await fetch(channelUrl, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                'Accept-Language': 'en-US,en;q=0.9'
+            }
+        });
+
+        if (!response.ok) {
+            console.error('YouTube channel fetch failed with status:', response.status);
+            return [];
+        }
+
+        const html = await response.text();
+
+        // Extract ytInitialData from the page
+        const initialDataMatch = html.match(/var ytInitialData\s*=\s*({.+?});/s);
+        if (!initialDataMatch) {
+            console.error('Could not find ytInitialData in channel page');
+            return [];
+        }
+
+        const initialData = JSON.parse(initialDataMatch[1]);
+
+        // Navigate to the videos tab content
+        const tabs = initialData?.contents?.twoColumnBrowseResultsRenderer?.tabs;
+        if (!tabs) {
+            console.error('Could not find tabs in channel data');
+            return [];
+        }
+
+        let videosContent = null;
+        for (const tab of tabs) {
+            if (tab?.tabRenderer?.title === 'Videos') {
+                videosContent = tab?.tabRenderer?.content?.richGridRenderer?.contents;
+                break;
+            }
+        }
+
+        if (!videosContent) {
+            console.error('Could not find videos tab content');
+            return [];
+        }
+
+        const videos = [];
+
+        for (const item of videosContent) {
+            if (videos.length >= maxResults) break;
+
+            const videoRenderer = item?.richItemRenderer?.content?.videoRenderer;
+            if (!videoRenderer) continue;
+
+            const videoId = videoRenderer.videoId;
+            const title = videoRenderer.title?.runs?.[0]?.text || '';
+            const thumbnail = `https://img.youtube.com/vi/${videoId}/mqdefault.jpg`;
+            const duration = videoRenderer.lengthText?.simpleText || '';
+            const viewCount = videoRenderer.viewCountText?.simpleText || '';
+            const publishedTime = videoRenderer.publishedTimeText?.simpleText || '';
+
+            if (videoId && title) {
+                videos.push({
+                    videoId,
+                    title,
+                    thumbnail,
+                    duration,
+                    viewCount,
+                    publishedTime
+                });
+            }
+        }
+
+        return videos;
+    } catch (error) {
+        console.error('Error fetching channel videos:', error);
+        return [];
+    }
+}
+
+// Search YouTube channels (admin only)
+app.get('/api/admin/youtube/search-channel', requireAuth, requireAdmin, async (req, res) => {
+    try {
+        const { q } = req.query;
+
+        if (!q || q.trim().length < 2) {
+            return res.status(400).json({ error: 'Search query must be at least 2 characters' });
+        }
+
+        const channels = await searchYouTubeChannels(q.trim());
+
+        res.json({ channels });
+    } catch (error) {
+        console.error('Error searching channels:', error);
+        res.status(500).json({ error: 'Error searching YouTube channels' });
+    }
+});
+
+// Get videos from a YouTube channel (admin only)
+app.get('/api/admin/youtube/channel-videos', requireAuth, requireAdmin, async (req, res) => {
+    try {
+        const { channelId } = req.query;
+
+        if (!channelId) {
+            return res.status(400).json({ error: 'Channel ID is required' });
+        }
+
+        const videos = await getChannelVideos(channelId, 50);
+
+        res.json({ videos });
+    } catch (error) {
+        console.error('Error fetching channel videos:', error);
+        res.status(500).json({ error: 'Error fetching channel videos' });
+    }
+});
+
+// Bulk extract recipes from YouTube videos (admin only)
+app.post('/api/admin/youtube/bulk-extract', requireAuth, requireAdmin, async (req, res) => {
+    try {
+        const { videos, channelName } = req.body;
+
+        if (!videos || !Array.isArray(videos) || videos.length === 0) {
+            return res.status(400).json({ error: 'Videos array is required' });
+        }
+
+        if (videos.length > 20) {
+            return res.status(400).json({ error: 'Maximum 20 videos per batch' });
+        }
+
+        if (!genAI) {
+            return res.status(500).json({ error: 'AI service not configured' });
+        }
+
+        const results = {
+            success: [],
+            failed: []
+        };
+
+        // Process videos sequentially with delays to avoid rate limiting
+        for (const video of videos) {
+            try {
+                const { videoId, title } = video;
+
+                if (!videoId) {
+                    results.failed.push({ videoId: 'unknown', title: title || 'Unknown', error: 'Missing video ID' });
+                    continue;
+                }
+
+                // Fetch transcript or description
+                let transcript = '';
+                let contentSource = 'transcript';
+
+                // Try transcript first
+                const languageOptions = [undefined, { lang: 'en' }, { lang: 'en-US' }];
+                for (const langOption of languageOptions) {
+                    try {
+                        const transcriptData = await YoutubeTranscript.fetchTranscript(videoId, langOption);
+                        if (transcriptData && transcriptData.length > 0) {
+                            transcript = transcriptData.map(item => item.text).join(' ');
+                            break;
+                        }
+                    } catch (e) {
+                        continue;
+                    }
+                }
+
+                // Fallback to description
+                let videoTitle = title;
+                let videoChannelName = channelName || '';
+
+                if (!transcript || transcript.trim().length < 100) {
+                    const videoInfo = await fetchYouTubeDescription(videoId);
+                    if (videoInfo) {
+                        videoTitle = videoInfo.title || title;
+                        videoChannelName = videoInfo.channelName || channelName || '';
+                        if (videoInfo.description && videoInfo.description.length > 50) {
+                            transcript = videoInfo.description;
+                            contentSource = 'description';
+                        }
+                    }
+                }
+
+                if (!transcript || transcript.trim().length < 50) {
+                    results.failed.push({ videoId, title: videoTitle, error: 'No captions or recipe in description' });
+                    continue;
+                }
+
+                // Call Gemini AI
+                const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+                const contextType = contentSource === 'description' ? 'video description' : 'video transcript';
+                const prompt = `Analyze this cooking ${contextType} and extract the recipe information.
+
+${contentSource === 'description' && videoTitle ? `Video Title: ${videoTitle}\n\n` : ''}${contextType.charAt(0).toUpperCase() + contextType.slice(1)}:
+${transcript.substring(0, 30000)}
+
+Extract and return ONLY a JSON object with this exact structure (no markdown, no explanation, no code blocks):
+{
+    "title": "Recipe name",
+    "ingredients": ["1 cup flour", "2 eggs", ...],
+    "instructions": ["Preheat oven to 350°F", "Mix dry ingredients", ...]
+}
+
+Rules:
+- Ingredients should include quantities and units when mentioned
+- Instructions should be clear, actionable steps
+- If the content doesn't contain a clear recipe, return {"error": "No recipe found in this video"}`;
+
+                const result = await model.generateContent(prompt);
+                const responseText = result.response.text();
+
+                // Parse JSON
+                let recipeData;
+                try {
+                    const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+                    recipeData = JSON.parse(jsonMatch ? jsonMatch[0] : responseText);
+                } catch (e) {
+                    results.failed.push({ videoId, title: videoTitle, error: 'Failed to parse AI response' });
+                    continue;
+                }
+
+                if (recipeData.error) {
+                    results.failed.push({ videoId, title: videoTitle, error: recipeData.error });
+                    continue;
+                }
+
+                // Save recipe to database
+                const thumbnailUrl = `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
+                const youtubeUrl = `https://www.youtube.com/watch?v=${videoId}`;
+
+                const recipeDoc = {
+                    user_id: req.userId,
+                    name: recipeData.title || videoTitle || 'Untitled Recipe',
+                    author: videoChannelName,
+                    image: thumbnailUrl,
+                    source_type: 'youtube',
+                    source_data: {
+                        type: 'youtube',
+                        url: youtubeUrl,
+                        videoId: videoId
+                    },
+                    ingredients: recipeData.ingredients || [],
+                    instructions: recipeData.instructions || [],
+                    status: 'approved', // Admin-imported recipes are auto-approved
+                    created_at: admin.firestore.FieldValue.serverTimestamp()
+                };
+
+                const recipeRef = await db.collection('recipes').add(recipeDoc);
+
+                results.success.push({
+                    videoId,
+                    title: recipeData.title || videoTitle,
+                    recipeId: recipeRef.id
+                });
+
+                // Small delay to avoid rate limiting
+                await new Promise(resolve => setTimeout(resolve, 1500));
+
+            } catch (videoError) {
+                console.error('Error processing video:', video.videoId, videoError);
+                results.failed.push({
+                    videoId: video.videoId,
+                    title: video.title || 'Unknown',
+                    error: videoError.message || 'Processing failed'
+                });
+            }
+        }
+
+        res.json({
+            success: true,
+            results,
+            summary: {
+                total: videos.length,
+                successful: results.success.length,
+                failed: results.failed.length
+            }
+        });
+    } catch (error) {
+        console.error('Bulk extraction error:', error);
+        res.status(500).json({ error: 'Bulk extraction failed: ' + error.message });
+    }
+});
+
+// ============================================
 // RECIPE CRUD OPERATIONS
 // ============================================
 
